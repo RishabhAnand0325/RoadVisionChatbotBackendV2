@@ -13,6 +13,8 @@ import json
 import os
 
 # Local modules
+from app.db.database import SessionLocal
+from app.modules.scraper.db.repository import ScraperRepository
 from detail_page_scrape import scrape_tender
 from drive import authenticate_google_drive, download_folders, get_shareable_link, upload_folder_to_drive
 from email_sender import listen_and_get_link, send_html_email
@@ -55,6 +57,21 @@ def scrape_link(link: str):
                 print("Error: " + str(e))
 
     download_folders(homepage)
+
+    # --- Save to Database ---
+    db = SessionLocal()
+    try:
+        print("\n💾 Saving scraped data to the database...")
+        scraper_repo = ScraperRepository(db)
+        scraper_repo.create_scrape_run(homepage)
+        print("✅ Scraped data saved successfully.")
+    except Exception as e:
+        print(f"❌ An error occurred while saving to the database: {e}")
+        db.rollback()
+    finally:
+        db.close()
+        print("🔒 Database session closed.")
+
     generated_template = generate_email(homepage)
     # insert_drive_links(generated_template)
 
