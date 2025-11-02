@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, timezone
 from sqlalchemy import Column, String, DateTime, ForeignKey, Integer, JSON, Boolean, Table, Text
 from sqlalchemy.dialects.postgresql import UUID, ARRAY
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, backref
 
 from app.db.database import Base
 
@@ -35,8 +35,7 @@ class DmsFolder(Base):
     subfolders = relationship(
         "DmsFolder",
         remote_side=[id],
-        backref="parent_folder",
-        cascade="all, delete-orphan"
+        backref=backref("parent_folder", cascade="all, delete-orphan"),
     )
     permissions = relationship("DmsFolderPermission", back_populates="folder", cascade="all, delete-orphan")
 
