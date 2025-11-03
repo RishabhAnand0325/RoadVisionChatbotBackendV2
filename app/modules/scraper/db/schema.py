@@ -1,11 +1,46 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Column, String, DateTime, ForeignKey, Text
+from sqlalchemy import Column, String, DateTime, ForeignKey, Text, Index, Boolean
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
 from app.db.database import Base
+
+
+class ScrapedEmailLog(Base):
+    """
+    Tracks emails from tenders@tenderdetail.com to prevent duplicate processing.
+    Uses composite key of email_uid + tender_url for deduplication.
+    """
+    __tablename__ = 'scraped_email_logs'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    # Email metadata
+    email_uid = Column(String, nullable=False, index=True)  # IMAP unique identifier
+    email_sender = Column(String, nullable=False)  # e.g., "tenders@tenderdetail.com"
+    email_received_at = Column(DateTime, nullable=False, index=True)  # When email was received
+
+    # Tender metadata
+    tender_url = Column(String, nullable=False, index=True)  # The scrape link extracted from email
+    tender_id = Column(String, nullable=True)  # Optional: tender ID if parsed
+
+    # Processing status
+    processed_at = Column(DateTime, default=datetime.utcnow, nullable=False)  # When we processed it
+    processing_status = Column(String, default="success", nullable=False)  # "success", "failed", "skipped"
+    error_message = Column(Text, nullable=True)  # If processing failed, store error
+
+    # Foreign key to scrape run (if successfully processed)
+    scrape_run_id = Column(UUID(as_uuid=True), ForeignKey('scrape_runs.id'), nullable=True)
+    scrape_run = relationship("ScrapeRun", foreign_keys=[scrape_run_id])
+
+    # Indexes for efficient querying
+    __table_args__ = (
+        Index('idx_email_uid_tender_url', 'email_uid', 'tender_url', unique=True),  # Composite unique constraint
+        Index('idx_email_received_at', 'email_received_at'),  # For 24-hour window queries
+        Index('idx_tender_url', 'tender_url'),  # For URL deduplication
+    )
 
 
 class ScrapeRun(Base):

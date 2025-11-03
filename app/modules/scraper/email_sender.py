@@ -46,8 +46,115 @@ def find_scrape_link(html_body: str) -> str | None:
     print("❌ Could not find the specific 'Click Here To View All' link in the email.")
     return None
 
+def listen_and_get_unprocessed_emails() -> list[dict] | None:
+    """
+    NEW APPROACH: 24-hour email polling with deduplication.
+
+    Instead of looking for unread emails (which breaks if user reads them),
+    this function:
+    1. Connects to inbox
+    2. Fetches ALL emails from last 24 hours from target senders
+    3. For each email, extracts the tender URL
+    4. Returns list of emails with their metadata
+
+    Return format:
+    [
+        {
+            'email_uid': '123',
+            'email_sender': 'tenders@tenderdetail.com',
+            'email_date': datetime,
+            'tender_url': 'https://...',
+            'message': email.Message object
+        },
+        ...
+    ]
+    """
+    mail = None
+    unprocessed_emails = []
+
+    try:
+        mail = imaplib.IMAP4_SSL(IMAP_SERVER)
+        mail.login(SENDER_EMAIL, SENDER_APP_PASSWORD)
+        mail.select("inbox")
+        print("✅ Email listener connected to inbox.")
+
+        for sender in TARGET_SENDERS:
+            # Search for emails from the sender (read or unread, doesn't matter)
+            # We only care that they're from this sender
+            status, messages = mail.search(None, f'(FROM "{sender}")')
+
+            if status != "OK" or not messages[0]:
+                print(f"ℹ️  No emails from {sender} found.")
+                continue
+
+            email_ids = messages[0].split()
+            print(f"Found {len(email_ids)} emails from {sender}. Processing...")
+
+            # Process emails in reverse order (newest first)
+            for email_id in reversed(email_ids[-50:]):  # Limit to last 50 emails for safety
+                try:
+                    status, msg_data = mail.fetch(email_id, "(RFC822)")
+
+                    if status != "OK":
+                        continue
+
+                    for response_part in msg_data:
+                        if isinstance(response_part, tuple):
+                            msg = email.message_from_bytes(response_part[1])
+
+                            # Extract email metadata
+                            email_uid = email_id.decode() if isinstance(email_id, bytes) else email_id
+                            email_date = email.utils.parsedate_to_datetime(msg['Date']) if msg['Date'] else None
+
+                            # Find HTML body
+                            html_body = ""
+                            if msg.is_multipart():
+                                for part in msg.walk():
+                                    if part.get_content_type() == "text/html":
+                                        html_body = part.get_payload(decode=True).decode()
+                                        break
+                            else:
+                                if msg.get_content_type() == "text/html":
+                                    html_body = msg.get_payload(decode=True).decode()
+
+                            # Extract tender link
+                            if html_body:
+                                tender_url = find_scrape_link(html_body)
+                                if tender_url:
+                                    unprocessed_emails.append({
+                                        'email_uid': email_uid,
+                                        'email_sender': sender,
+                                        'email_date': email_date,
+                                        'tender_url': tender_url,
+                                        'message': msg,
+                                    })
+                                    print(f"✅ Extracted tender URL from email {email_uid}: {tender_url}")
+
+                except Exception as e:
+                    print(f"⚠️  Error processing email {email_id}: {e}")
+                    continue
+
+    except Exception as e:
+        print(f"❌ An error occurred while checking emails: {e}")
+    finally:
+        if mail:
+            try:
+                if mail.state == 'SELECTED':
+                    mail.close()
+                    print("Mailbox closed.")
+                mail.logout()
+                print("Listener disconnected (logged out).")
+            except Exception as e:
+                print(f"Error during IMAP cleanup: {e}")
+
+    return unprocessed_emails if unprocessed_emails else None
+
+
 def listen_and_get_link() -> str | None:
     """
+    DEPRECATED: Old approach that relied on UNSEEN flag.
+    Kept for backward compatibility, but use listen_and_get_unprocessed_emails() instead.
+
     Connects to the inbox, searches for the newest unread email from a target sender,
     and extracts the scraping link from it.
     """
@@ -61,22 +168,22 @@ def listen_and_get_link() -> str | None:
         for sender in TARGET_SENDERS:
             # Search for unread emails from the current sender
             status, messages = mail.search(None, f'(UNSEEN FROM "{sender}")')
-            
+
             if status != "OK" or not messages[0]:
                 continue # Skip to the next sender if no messages found
 
             email_ids = messages[0].split()
             latest_email_id = email_ids[-1] # Get the most recent one
-            
+
             print(f"Found new email from {sender}. Fetching...")
-            
+
             # Fetch the full email content
             status, msg_data = mail.fetch(latest_email_id, "(RFC822)")
-            
+
             for response_part in msg_data:
                 if isinstance(response_part, tuple):
                     msg = email.message_from_bytes(response_part[1])
-                    
+
                     # Find the HTML part of the email.
                     # msg.walk() will traverse all parts, including the
                     # nested ones in the forwarded email.
@@ -89,12 +196,12 @@ def listen_and_get_link() -> str | None:
                     else:
                         if msg.get_content_type() == "text/html":
                             html_body = msg.get_payload(decode=True).decode()
-                    
+
                     if html_body:
                         # Mark the email as read so we don't process it again
                         # mail.store(latest_email_id, '+FLAGS', '\\Seen')
                         # print("Email marked as read.")
-                        
+
                         # Find and return the specific link
                         return find_scrape_link(html_body)
 
@@ -110,7 +217,7 @@ def listen_and_get_link() -> str | None:
                 print("Listener disconnected (logged out).")
             except Exception as e:
                 print(f"Error during IMAP cleanup: {e}")
-            
+
     return None
 
 def send_html_email(soup: BeautifulSoup):

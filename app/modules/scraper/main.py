@@ -17,7 +17,7 @@ from app.db.database import SessionLocal
 from app.modules.scraper.db.repository import ScraperRepository
 from .detail_page_scrape import scrape_tender
 # from .drive import authenticate_google_drive, download_folders, get_shareable_link, upload_folder_to_drive
-from .email_sender import listen_and_get_link, send_html_email
+from .email_sender import listen_and_get_link, listen_and_get_unprocessed_emails, send_html_email
 from .home_page_scrape import scrape_page
 from .services.dms_integration_service import process_tenders_for_dms
 from .templater import generate_email, reformat_page
@@ -88,9 +88,139 @@ def scrape_link(link: str):
     send_html_email(generated_template)
 
 def listen_email():
+    """
+    NEW APPROACH: 24-hour email polling with deduplication.
+
+    Flow:
+    1. Fetch ALL emails from tenders@tenderdetail.com (read or unread)
+    2. For each email, extract the tender URL
+    3. Check if email+tender has been processed before
+    4. Check if tender URL has been processed from ANY email
+    5. If not processed, scrape it and log in database
+    6. Wait 5 minutes and repeat
+
+    This avoids the "user reads email → listener can't find it" bug.
+    """
+    while True:
+        print("\n--- Starting new cycle: Checking for tender emails (24-hour polling) ---")
+
+        db = SessionLocal()
+        try:
+            scraper_repo = ScraperRepository(db)
+
+            # 1. Get all emails from last 24 hours
+            emails_data = listen_and_get_unprocessed_emails()
+
+            if not emails_data:
+                print("ℹ️  No emails from target senders found.")
+                db.close()
+                time.sleep(300)
+                continue
+
+            print(f"📧 Found {len(emails_data)} emails with tender URLs. Checking deduplication...")
+
+            # 2. Process each email
+            processed_count = 0
+            skipped_count = 0
+
+            for email_info in emails_data:
+                email_uid = email_info['email_uid']
+                email_sender = email_info['email_sender']
+                email_date = email_info['email_date']
+                tender_url = email_info['tender_url']
+
+                print(f"\n📋 Processing email {email_uid} from {email_sender}")
+                print(f"   Tender URL: {tender_url}")
+
+                # 3. Check if this email+tender combination has been processed
+                if scraper_repo.has_email_been_processed(email_uid, tender_url):
+                    print(f"   ⏭️  Skipping: Email {email_uid} + tender already processed")
+                    scraper_repo.log_email_processing(
+                        email_uid=email_uid,
+                        email_sender=email_sender,
+                        email_received_at=email_date,
+                        tender_url=tender_url,
+                        processing_status="skipped",
+                        error_message="Email+tender combination already processed"
+                    )
+                    skipped_count += 1
+                    continue
+
+                # 4. Check if this tender URL has been processed from ANY email
+                if scraper_repo.has_tender_url_been_processed(tender_url):
+                    print(f"   ⏭️  Skipping: Tender URL already processed from different email")
+                    scraper_repo.log_email_processing(
+                        email_uid=email_uid,
+                        email_sender=email_sender,
+                        email_received_at=email_date,
+                        tender_url=tender_url,
+                        processing_status="skipped",
+                        error_message="Tender URL already processed"
+                    )
+                    skipped_count += 1
+                    continue
+
+                # 5. This is a new email → Scrape it!
+                print(f"   🚀 NEW email! Starting scrape for: {tender_url}")
+                try:
+                    # Close the current session for the scrape
+                    db.close()
+
+                    scrape_link(tender_url)  # Your existing scraping function
+
+                    # Re-open session for logging
+                    db = SessionLocal()
+                    scraper_repo = ScraperRepository(db)
+
+                    # Log successful processing
+                    scraper_repo.log_email_processing(
+                        email_uid=email_uid,
+                        email_sender=email_sender,
+                        email_received_at=email_date,
+                        tender_url=tender_url,
+                        processing_status="success"
+                    )
+
+                    print(f"   ✅ Scraping completed successfully for {tender_url}")
+                    processed_count += 1
+
+                except Exception as e:
+                    # Log the failure
+                    scraper_repo.log_email_processing(
+                        email_uid=email_uid,
+                        email_sender=email_sender,
+                        email_received_at=email_date,
+                        tender_url=tender_url,
+                        processing_status="failed",
+                        error_message=str(e)
+                    )
+                    print(f"   ❌ Error during scrape: {e}")
+
+            # 6. Print summary
+            print(f"\n📊 Cycle Summary:")
+            print(f"   ✅ Processed: {processed_count} new tenders")
+            print(f"   ⏭️  Skipped: {skipped_count} already processed")
+
+        except Exception as e:
+            print(f"❌ Critical error in listen_email: {e}")
+            db.rollback()
+        finally:
+            db.close()
+
+        # 7. Wait for 5 minutes before checking again
+        sleep_duration_seconds = 300
+        print(f"--- Cycle complete. Waiting {sleep_duration_seconds / 60} minutes until next check... ---")
+        time.sleep(sleep_duration_seconds)
+
+
+def listen_email_old():
+    """
+    DEPRECATED: Old implementation using UNSEEN flag.
+    Kept for reference but use listen_email() instead.
+    """
     while True:
         print("\n--- Starting new cycle: Listening for trigger email ---")
-        
+
         # 1. Call the listener to get a link
         link_to_scrape = listen_and_get_link()
 
