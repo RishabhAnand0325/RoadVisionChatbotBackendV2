@@ -19,7 +19,8 @@ class Settings:
     MAX_EXCEL_SIZE_MB: int = 10
 
     # RAG
-    RAG_TOP_K: int = 15
+    RAG_TOP_K: int = 15  # Number of documents to retrieve per query
+    RAG_MEMORY_SIZE: int = 10  # Number of recent messages to keep in memory (Phase 2+)
 
     # Feature Flags
     USE_LANGCHAIN_RAG: bool = False  # Toggle for LangChain migration (Phase 1+)
