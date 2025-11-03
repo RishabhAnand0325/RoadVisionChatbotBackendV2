@@ -52,9 +52,14 @@ class TenderFilterService:
             # Count total tenders across all queries in this scrape run
             tender_count = sum(len(query.tenders) for query in scrape_run.queries)
 
+            # Use run_at timestamp for consistent date derivation
+            # This ensures date (YYYY-MM-DD) and date_str are derived from the same source
+            date_only = scrape_run.run_at.strftime("%Y-%m-%d")
+            date_str_formatted = scrape_run.run_at.strftime("%A, %B %d, %Y")
+
             date_obj = ScrapeDateInfo(
-                date=scrape_run.run_at.strftime("%Y-%m-%d"),
-                date_str=scrape_run.date_str,
+                date=date_only,
+                date_str=date_str_formatted,
                 run_at=scrape_run.run_at,
                 tender_count=tender_count,
                 is_latest=is_first,
