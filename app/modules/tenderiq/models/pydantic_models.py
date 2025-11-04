@@ -33,11 +33,23 @@ class TenderAnalysis(TenderAnalysisBase):
 # --- Scraper Daily Tenders Models ---
 
 class ScrapedTenderFile(BaseModel):
+    """
+    File metadata with support for hybrid remote + local caching storage.
+
+    Fields:
+    - file_url: Original internet source (for reference/direct access)
+    - dms_path: DMS reference path where file is/will be cached (the authoritative path)
+    - is_cached: Whether file has been downloaded to local DMS
+    - cache_status: Current state (pending, cached, failed)
+    """
     id: UUID
     file_name: str
-    file_url: str
+    file_url: str  # Original internet URL
+    dms_path: str  # DMS reference path (/tenders/YYYY/MM/DD/tender_id/files/filename)
     file_description: Optional[str] = None
     file_size: Optional[str] = None
+    is_cached: bool = False  # Whether file is cached locally in DMS
+    cache_status: Optional[str] = "pending"  # "pending", "cached", or "failed"
     model_config = ConfigDict(from_attributes=True)
 
 
