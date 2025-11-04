@@ -99,14 +99,21 @@ def process_tenders_for_dms(db: Session, homepage_data: HomePageData) -> tuple[H
                 print(f"     Registering {file_count} remote file references...")
 
                 for file_data in tender.details.other_detail.files:
-                    # Store file reference with URL
-                    # The scraper's repository.create_scrape_run will save these with:
-                    # - file_url: Original internet URL (source of truth)
-                    # - dms_path: /tenders/YYYY/MM/DD/tender_id/files/filename
-                    # - is_cached: False (not downloaded yet)
-                    # - cache_status: "pending" (ready for background caching)
-                    print(f"    📌 Registered: {file_data.file_name}")
-                    print(f"       URL: {file_data.file_url}")
+                    # Create DMS document for each tender file
+                    # This makes the file appear as a native DMS document
+                    try:
+                        dms_doc = dms_service.create_tender_document(
+                            filename=file_data.file_name,
+                            source_url=file_data.file_url,
+                            folder_id=tender_folder.id,
+                            uploaded_by=system_user_id,
+                            file_size=int(file_data.file_size) if file_data.file_size else None,
+                            confidentiality_level='internal'
+                        )
+                        print(f"    📄 Created DMS document: {file_data.file_name}")
+                        print(f"       Document ID: {dms_doc.id}")
+                    except Exception as e:
+                        print(f"    ⚠️  Failed to create DMS document for {file_data.file_name}: {e}")
 
             except Exception as e:
                 print(f"    ❌ An error occurred processing tender {tender.tender_id} for DMS: {e}")

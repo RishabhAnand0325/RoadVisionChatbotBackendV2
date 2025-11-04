@@ -455,6 +455,78 @@ class DmsService:
             self.repo.rollback()
             raise HTTPException(status_code=500, detail=f"Error confirming upload: {str(e)}")
 
+    # ==================== TENDER FILE SERVICES ====================
+
+    def create_tender_document(
+        self,
+        filename: str,
+        source_url: str,
+        folder_id: UUID,
+        uploaded_by: UUID,
+        scraped_tender_file_id: Optional[UUID] = None,
+        file_size: Optional[int] = None,
+        confidentiality_level: str = ConfidentialityLevel.INTERNAL
+    ) -> Document:
+        """
+        Create a DMS document from a remote tender file.
+
+        This creates a document that references an internet URL instead of storing
+        the file locally. The document appears in the DMS hierarchy like any other document.
+
+        Args:
+            filename: Name of the file (displayed in DMS)
+            source_url: Original internet URL to the tender file
+            folder_id: DMS folder to place the document in
+            uploaded_by: User ID creating the document
+            scraped_tender_file_id: Reference to ScrapedTenderFile record (for tracking)
+            file_size: File size in bytes (optional, can be determined later)
+            confidentiality_level: DMS confidentiality level
+
+        Returns:
+            Document: The created DMS document record
+        """
+        try:
+            # Validate folder exists
+            folder = self.repo.get_folder(folder_id)
+            if not folder:
+                raise HTTPException(status_code=404, detail="Folder not found")
+
+            # Guess MIME type from filename
+            import mimetypes
+            mime_type, _ = mimetypes.guess_type(filename)
+            if mime_type is None:
+                mime_type = 'application/octet-stream'
+
+            # Create document with remote source information
+            document = self.repo.create_document(
+                name=filename,
+                original_filename=filename,
+                mime_type=mime_type,
+                size_bytes=file_size,
+                uploaded_by=uploaded_by,
+                folder_id=folder_id,
+                confidentiality_level=confidentiality_level,
+                status="active",  # Already available (remote URL)
+                storage_provider="remote"  # Mark as remote file
+            )
+
+            # Set tender file specific fields
+            document.source_url = source_url
+            document.is_tender_file = True
+            document.is_cached = False
+            document.cache_status = "pending"
+            document.scraped_tender_file_id = scraped_tender_file_id
+
+            self.repo.commit()
+            return self._document_to_response(document)
+
+        except HTTPException:
+            self.repo.rollback()
+            raise
+        except Exception as e:
+            self.repo.rollback()
+            raise HTTPException(status_code=500, detail=f"Error creating tender document: {str(e)}")
+
     # ==================== CATEGORY SERVICES ====================
 
     def list_categories(self) -> List[DocumentCategory]:
@@ -720,18 +792,91 @@ class DmsService:
             raise HTTPException(status_code=500, detail=f"Error generating download URL: {str(e)}")
 
     def get_document_for_download(self, document_id: UUID) -> Tuple[Path, str]:
-        """Get full file path and name for download."""
+        """
+        Get full file path and name for download.
+
+        Supports both local and remote tender files:
+        - Local: Returns path to local file
+        - Remote tender file: Downloads from source URL and caches, returns cached path
+        """
         try:
             document = self.repo.get_document(document_id)
             if not document:
                 raise HTTPException(status_code=404, detail="Document not found")
-            
+
+            # Handle remote tender files with smart caching
+            if document.is_tender_file and document.storage_provider == "remote":
+                return self._handle_tender_file_download(document)
+
+            # Standard local file handling
             full_path = FileStorageService.get_full_path(document.storage_path)
             return full_path, document.original_filename
         except HTTPException:
             raise
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Error preparing file for download: {str(e)}")
+
+    def _handle_tender_file_download(self, document) -> Tuple[Path, str]:
+        """
+        Handle download of a tender file.
+
+        Smart caching logic:
+        1. If file is cached locally → return cached path
+        2. If not cached → download from source URL → cache → return cached path
+        """
+        import requests
+        from app.modules.dmsiq.services.file_storage import FileStorageService
+
+        # Check if already cached
+        if document.is_cached:
+            cached_path = FileStorageService.get_full_path(document.storage_path)
+            if cached_path.exists():
+                return cached_path, document.original_filename
+
+        # File not cached, need to download
+        if not document.source_url:
+            raise HTTPException(
+                status_code=400,
+                detail="Remote file has no source URL"
+            )
+
+        try:
+            # Download from remote URL
+            response = requests.get(document.source_url, timeout=60)
+            response.raise_for_status()
+            file_content = response.content
+
+            # Cache the file
+            success, result = FileStorageService.save_file(
+                file_content,
+                document.storage_path
+            )
+
+            if not success:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Failed to cache tender file: {result}"
+                )
+
+            # Update document cache status
+            document.is_cached = True
+            document.cache_status = "cached"
+            document.cache_error = None
+            self.repo.commit()
+
+            cached_path = FileStorageService.get_full_path(document.storage_path)
+            return cached_path, document.original_filename
+
+        except requests.RequestException as e:
+            # Update document with error
+            document.cache_status = "failed"
+            document.cache_error = f"Failed to download: {str(e)}"
+            self.repo.commit()
+
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to download tender file: {str(e)}"
+            )
 
     def get_summary(self) -> DocumentSummary:
         """Get DMS summary statistics."""

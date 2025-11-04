@@ -46,7 +46,7 @@ class DmsDocument(Base):
     original_filename = Column(String, nullable=False)
     mime_type = Column(String, nullable=False)
     size_bytes = Column(Integer)
-    storage_provider = Column(String, default='local', nullable=False)  # 's3' or 'local'
+    storage_provider = Column(String, default='local', nullable=False)  # 's3' or 'local' or 'remote'
     storage_path = Column(String, nullable=False)  # Relative path from dms root
     s3_bucket = Column(String)
     s3_etag = Column(String)
@@ -62,6 +62,14 @@ class DmsDocument(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     is_deleted = Column(Boolean, default=False)  # For soft delete
+
+    # Remote/Tender File Support
+    source_url = Column(String, nullable=True)  # Original internet URL for tender files
+    is_tender_file = Column(Boolean, default=False)  # Whether this is from a tender scrape
+    is_cached = Column(Boolean, default=False)  # Whether remote file has been cached locally
+    cache_status = Column(String, default='pending', nullable=True)  # pending, cached, failed (for remote files)
+    cache_error = Column(Text, nullable=True)  # Error message if caching failed
+    scraped_tender_file_id = Column(UUID(as_uuid=True), nullable=True)  # Reference to ScrapedTenderFile
 
     # Relationships
     folder = relationship("DmsFolder", back_populates="documents")
