@@ -4,6 +4,7 @@ from datetime import datetime
 from sqlalchemy import (Column, String, DateTime, ForeignKey, Text, JSON,
                         Integer, Boolean, Enum as SQLAlchemyEnum, Float)
 from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import relationship
 
 from app.db.database import Base
@@ -41,7 +42,7 @@ class TenderAnalysis(Base):
     tender_id = Column(UUID(as_uuid=True), ForeignKey(Tender.id))
     user_id = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=False, index=True)
     
-    status = Column(SQLAlchemyEnum(AnalysisStatusEnum, name='analysisstatusenum', create_type=False), default=AnalysisStatusEnum.pending, index=True)
+    status = Column(postgresql.ENUM(AnalysisStatusEnum, name='analysisstatusenum', create_type=False), default=AnalysisStatusEnum.pending, index=True)
     progress = Column(Integer, default=0)
     current_step = Column(String(50), default="initializing")
     analysis_type = Column(String(50), default="full")
@@ -81,8 +82,8 @@ class AnalysisRisk(Base):
     __tablename__ = "analysis_risks"
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     analysis_id = Column(UUID(as_uuid=True), ForeignKey("tender_analysis.id"), nullable=False, index=True)
-    level = Column(SQLAlchemyEnum(RiskLevelEnum, name='risklevelenum', create_type=False), nullable=False)
-    category = Column(SQLAlchemyEnum(RiskCategoryEnum, name='riskcategoryenum', create_type=False), nullable=False)
+    level = Column(postgresql.ENUM(RiskLevelEnum, name='risklevelenum', create_type=False), nullable=False)
+    category = Column(postgresql.ENUM(RiskCategoryEnum, name='riskcategoryenum', create_type=False), nullable=False)
     title = Column(String(255), nullable=False)
     description = Column(Text, nullable=False)
     impact = Column(String(20), nullable=False)
