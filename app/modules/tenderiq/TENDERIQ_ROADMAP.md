@@ -15,7 +15,7 @@ These items address critical bugs and incomplete features that prevent the modul
 
 ### High Priority
 
--   **[ ] Implement Core Analysis Pipeline**
+-   **[x] Implement Core Analysis Pipeline**
     -   **File:** `app/modules/tenderiq/services/analysis_service.py`
     -   **Issue:** The `process_analysis` function is a skeleton. The core logic for document parsing, risk assessment, RFP analysis, etc., is commented out with `# TODO`.
     -   **Fix:** Implement the commented-out steps to call the real, asynchronous analysis services.

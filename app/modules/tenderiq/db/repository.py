@@ -6,6 +6,7 @@ Encapsulates all data access logic for TenderIQ features.
 
 from typing import Optional, List
 from uuid import UUID
+from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 
 from app.modules.tenderiq.db.schema import (
@@ -15,6 +16,7 @@ from app.modules.tenderiq.db.schema import (
     AnalysisRFPSection,
     TenderExtractedContent,
     ExtractionQualityMetrics,
+    AnalysisStatusEnum,
 )
 
 
@@ -47,6 +49,39 @@ class AnalyzeRepository:
             .first()
         )
 
+    def update_analysis_status(
+        self,
+        analysis_id: UUID,
+        status: AnalysisStatusEnum,
+        progress: Optional[int] = None,
+        current_step: Optional[str] = None,
+        error_message: Optional[str] = None,
+    ):
+        """Update the status and progress of an analysis."""
+        analysis = self.get_analysis_by_id(analysis_id)
+        if not analysis:
+            return None
+
+        analysis.status = status
+        if progress is not None:
+            analysis.progress = progress
+        if current_step is not None:
+            analysis.current_step = current_step
+        if error_message is not None:
+            analysis.error_message = error_message
+        
+        if status == AnalysisStatusEnum.processing and not analysis.started_at:
+            analysis.started_at = datetime.utcnow()
+        
+        if status in [AnalysisStatusEnum.completed, AnalysisStatusEnum.failed]:
+            analysis.completed_at = datetime.utcnow()
+            if analysis.started_at:
+                analysis.processing_time_ms = int((analysis.completed_at - analysis.started_at).total_seconds() * 1000)
+
+        self.db.commit()
+        self.db.refresh(analysis)
+        return analysis
+
     def get_analysis_results(
         self, analysis_id: UUID
     ) -> Optional[AnalysisResults]:
@@ -56,6 +91,32 @@ class AnalyzeRepository:
             .filter(AnalysisResults.analysis_id == analysis_id)
             .first()
         )
+
+    def create_or_update_analysis_results(
+        self,
+        analysis_id: UUID,
+        summary: dict,
+        rfp: dict,
+        scope: dict,
+        one_pager: dict
+    ) -> AnalysisResults:
+        """Create or update analysis results."""
+        results = self.get_analysis_results(analysis_id)
+        if not results:
+            results = AnalysisResults(
+                analysis_id=analysis_id,
+                expires_at=datetime.utcnow() + timedelta(days=7) # Add expiration
+            )
+            self.db.add(results)
+        
+        results.summary_json = summary
+        results.rfp_analysis_json = rfp
+        results.scope_of_work_json = scope
+        results.one_pager_json = one_pager
+        
+        self.db.commit()
+        self.db.refresh(results)
+        return results
 
     def get_user_analyses(
         self, user_id: UUID, status: Optional[str], tender_id: Optional[UUID], limit: int, offset: int
