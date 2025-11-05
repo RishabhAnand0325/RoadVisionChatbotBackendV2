@@ -37,10 +37,10 @@ These items address critical bugs and incomplete features that prevent the modul
 
 ### Medium Priority
 
--   **[ ] Fix Incorrect Data in Analysis Results**
+-   **[x] Fix Incorrect Data in Analysis Results**
     -   **File:** `app/modules/tenderiq/services/analysis_service.py`
     -   **Issue:** In `get_analysis_results`, the `riskAssessment` key is incorrectly populated with `rfp_analysis_json` data due to a copy-paste error.
-    -   **Fix:** Correct the key mapping to return the correct JSON data for `riskAssessment`.
+    -   **Fix:** Corrected the key mapping to pull the `risk_assessment` data from the `summary_json` field.
 
 ---
 

@@ -166,13 +166,16 @@ class AnalysisService:
             return None
 
         # Build complete results response
+        summary_data = results.summary_json or {}
+        risk_assessment_data = summary_data.get("advanced_intelligence", {}).get("risk_assessment", {})
+
         return AnalysisResultsResponse(
             analysis_id=analysis.id,
             tender_id=analysis.tender_id,
             status=analysis.status.value,
             results={
-                "summary": results.summary_json or {},
-                "riskAssessment": results.rfp_analysis_json or {},
+                "summary": summary_data,
+                "riskAssessment": risk_assessment_data,
                 "rfpAnalysis": results.rfp_analysis_json or {},
                 "scopeOfWork": results.scope_of_work_json or {},
                 "onePager": results.one_pager_json or {},
