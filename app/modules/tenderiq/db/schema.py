@@ -173,7 +173,7 @@ class AnalysisResults(Base):
     __tablename__ = "analysis_results"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    analysis_id = Column(UUID(as_uuid=True), ForeignKey("tender_analysis.id"), nullable=False, unique=True, index=True)
+    analysis_id = Column(UUID(as_uuid=True), ForeignKey("tender_analysis.id"), nullable=False, unique=True)
 
     summary_json = Column(JSON, nullable=True)  # {title, overview, keyPoints}
     rfp_analysis_json = Column(JSON, nullable=True)  # {sections, missingDocuments}
@@ -270,7 +270,7 @@ class TenderExtractedContent(Base):
     __tablename__ = "tender_extracted_content"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    analysis_id = Column(UUID(as_uuid=True), ForeignKey("tender_analysis.id"), nullable=False, unique=True, index=True)
+    analysis_id = Column(UUID(as_uuid=True), ForeignKey("tender_analysis.id"), nullable=False, unique=True)
 
     # Document metadata
     original_filename = Column(String(500), nullable=False)
@@ -313,7 +313,7 @@ class ExtractionQualityMetrics(Base):
     __tablename__ = "extraction_quality_metrics"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    analysis_id = Column(UUID(as_uuid=True), ForeignKey("tender_analysis.id"), nullable=False, unique=True, index=True)
+    analysis_id = Column(UUID(as_uuid=True), ForeignKey("tender_analysis.id"), nullable=False, unique=True)
 
     # Quality scores
     data_completeness = Column(Float, default=0.0)  # 0-100: how much data was extracted
