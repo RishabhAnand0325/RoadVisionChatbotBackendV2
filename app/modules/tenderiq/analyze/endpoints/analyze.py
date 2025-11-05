@@ -30,6 +30,7 @@ from app.modules.tenderiq.analyze.services.risk_assessment_service import RiskAs
 from app.modules.tenderiq.analyze.services.rfp_extraction_service import RFPExtractionService
 from app.modules.tenderiq.analyze.services.scope_extraction_service import ScopeExtractionService
 from app.modules.tenderiq.analyze.services.report_generation_service import ReportGenerationService
+from app.modules.tenderiq.analyze.services.quality_indicators import QualityIndicatorsService
 
 router = APIRouter()
 
@@ -796,4 +797,227 @@ def delete_analysis(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error deleting analysis",
+        )
+
+
+# ==================== Endpoint 11: Get Advanced Intelligence (Phase 4) ====================
+
+@router.get(
+    "/analysis/{analysis_id}/advanced-intelligence",
+    response_model=dict,
+    tags=["Analyze"],
+    summary="Get Phase 4 Advanced Intelligence Analysis",
+)
+def get_advanced_intelligence(
+    analysis_id: UUID,
+    db: Session = Depends(get_db_session),
+    current_user = Depends(get_current_active_user),
+):
+    """
+    Retrieve Phase 4 Advanced Intelligence analysis results.
+
+    Includes:
+    - SWOT Analysis (Strengths, Weaknesses, Opportunities, Threats)
+    - Bid Decision Recommendation (Recommend bidding or not)
+    - Enhanced Risk Assessment (Risk factors and mitigations)
+    - Compliance Check (Compliance with requirements)
+    - Cost Breakdown (Estimated costs by category)
+    - Win Probability (Estimated probability of winning)
+
+    **Response (200 OK):**
+    ```json
+    {
+      "analysis_id": "uuid",
+      "advanced_intelligence": {
+        "swot": {
+          "strengths": [...],
+          "weaknesses": [...],
+          "opportunities": [...],
+          "threats": [...],
+          "confidence": 85.0
+        },
+        "bid_recommendation": {
+          "recommendation": "STRONG BID|CONDITIONAL BID|CAUTION|NO BID",
+          "score": 75,
+          "rationale": "..."
+        },
+        "risk_assessment": {
+          "overall_score": 60,
+          "risk_level": "MEDIUM",
+          "individual_risks": [...]
+        },
+        "compliance": {
+          "overall_compliance": "COMPLIANT|PARTIALLY_COMPLIANT|NON-COMPLIANT",
+          "compliance_score": 85.0,
+          "items": [...],
+          "gaps": [...]
+        },
+        "cost_breakdown": {
+          "line_items": [...],
+          "total_estimate": 500000,
+          "margin": 15
+        },
+        "win_probability": {
+          "win_probability": 68.5,
+          "category": "HIGH|MODERATE|LOW",
+          "confidence": 75.0
+        }
+      },
+      "retrieved_at": "2025-11-05T10:35:00Z"
+    }
+    ```
+
+    **Status Codes:**
+    - `200 OK` - Analysis retrieved
+    - `202 Accepted` - Analysis still processing
+    - `404 Not Found` - Analysis ID not found
+    """
+    try:
+        service = AnalysisService()
+
+        results = service.get_analysis_results(
+            db=db,
+            analysis_id=analysis_id,
+            user_id=current_user.id,
+        )
+
+        if results is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Analysis not found",
+            )
+
+        # Extract Phase 4 intelligence from results
+        intelligence = {
+            "analysis_id": analysis_id,
+            "advanced_intelligence": {
+                "swot": results.get("results", {}).get("swot_analysis"),
+                "bid_recommendation": results.get("results", {}).get("bid_recommendation"),
+                "risk_assessment": results.get("results", {}).get("risk_assessment"),
+                "compliance": results.get("results", {}).get("compliance_check"),
+                "cost_breakdown": results.get("results", {}).get("cost_breakdown"),
+                "win_probability": results.get("results", {}).get("win_probability"),
+            },
+            "retrieved_at": datetime.utcnow().isoformat(),
+        }
+
+        return intelligence
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error retrieving advanced intelligence: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error retrieving advanced intelligence",
+        )
+
+
+# ==================== Endpoint 12: Get Quality Metrics (Phase 5) ====================
+
+@router.get(
+    "/analysis/{analysis_id}/quality-metrics",
+    response_model=dict,
+    tags=["Analyze"],
+    summary="Get Phase 5 Quality Indicators and Metrics",
+)
+def get_quality_metrics(
+    analysis_id: UUID,
+    db: Session = Depends(get_db_session),
+    current_user = Depends(get_current_active_user),
+):
+    """
+    Retrieve Phase 5 Quality Indicators and Metadata for an analysis.
+
+    Provides comprehensive quality assessment across:
+    - Data Completeness (0-100 score)
+    - Extraction Accuracy (0-100 score)
+    - Overall Confidence (0-100 score)
+    - Processing Health (0-100 score)
+    - Analysis Coverage (0-100 score)
+    - Quality Level (EXCELLENT, GOOD, FAIR, POOR)
+
+    **Response (200 OK):**
+    ```json
+    {
+      "analysis_id": "uuid",
+      "quality_metrics": {
+        "overall_score": 82.5,
+        "quality_level": "good",
+        "indicators": [
+          {
+            "name": "Data Completeness",
+            "score": 85.0,
+            "weight": 1.5,
+            "description": "Percentage of expected fields extracted",
+            "issues": []
+          },
+          ...
+        ]
+      },
+      "quality_report": {
+        "summary": "Analysis quality is GOOD",
+        "recommendations": [
+          "✅ Analysis quality is high, proceed with confidence"
+        ]
+      },
+      "metadata": {
+        "analysis_id": "uuid",
+        "tender_id": "uuid",
+        "created_at": "2025-11-05T10:30:00Z",
+        "completed_at": "2025-11-05T10:35:00Z",
+        "processing_time_ms": 305000,
+        "version": "1.0",
+        "tags": []
+      },
+      "assessed_at": "2025-11-05T10:35:00Z"
+    }
+    ```
+
+    **Status Codes:**
+    - `200 OK` - Quality metrics retrieved
+    - `202 Accepted` - Analysis still processing
+    - `404 Not Found` - Analysis ID not found
+    """
+    try:
+        service = AnalysisService()
+        quality_service = QualityIndicatorsService()
+
+        results = service.get_analysis_results(
+            db=db,
+            analysis_id=analysis_id,
+            user_id=current_user.id,
+        )
+
+        if results is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Analysis not found",
+            )
+
+        # Extract Phase 5 quality metrics from results
+        quality_metrics = results.get("results", {}).get("quality_metrics", {})
+
+        # Generate quality report if metrics exist
+        quality_report = None
+        if quality_metrics:
+            quality_report = quality_service.generate_quality_report(quality_metrics)
+
+        response = {
+            "analysis_id": analysis_id,
+            "quality_metrics": quality_metrics,
+            "quality_report": quality_report,
+            "metadata": results.get("results", {}).get("metadata"),
+            "assessed_at": datetime.utcnow().isoformat(),
+        }
+
+        return response
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Error retrieving quality metrics: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error retrieving quality metrics",
         )
