@@ -16,8 +16,8 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 import threading
 
-from app.modules.tenderiq.db.repository import AnalyzeRepository
-from app.modules.tenderiq.db.schema import AnalysisStatusEnum
+from app.modules.tenderiq.analyze.db.repository import AnalyzeRepository
+from app.modules.tenderiq.analyze.db.schema import AnalysisStatusEnum
 from app.modules.tenderiq.models.pydantic_models import (
     AnalysisInitiatedResponse,
     AnalysisStatusResponse,
