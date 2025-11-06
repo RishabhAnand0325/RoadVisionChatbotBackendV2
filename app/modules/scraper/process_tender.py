@@ -20,7 +20,7 @@ def start_tender_processing(tender: TenderDetailPage):
     vector database
     2. It will then perform some additional LLM magic on them and add them to the tender_analysis table
     """
-    tender_id = tender.notice.tender_id
+    tender_id = tender.notice.tdr
     if not tender_id:
         print("❌ Tender ID not found, cannot process.")
         return
