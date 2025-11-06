@@ -143,8 +143,7 @@ ANSWER:"""
 
         # a. Create a TenderAnalysis record
         analyze_repo = AnalyzeRepository(db)
-        system_user_id = uuid.UUID('00000000-0000-0000-0000-000000000000') 
-        analysis = analyze_repo.create_for_tender(tender_id, system_user_id)
+        analysis = analyze_repo.create_for_tender(tender_id, user_id=None)
         
         analyze_repo.update(analysis, {"status": AnalysisStatusEnum.analyzing, "status_message": "Generating One-Pager..."})
 

@@ -32,7 +32,7 @@ class TenderAnalysis(Base):
     
     # One-to-one relationship to the ScrapedTender being analyzed. This refers to scraped_tenders.tender_id_str.
     tender_id: Mapped[str] = mapped_column(String, nullable=False, unique=True, index=True)
-    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey(User.id), nullable=False, index=True)
+    user_id: Mapped[Optional[uuid.UUID]] = mapped_column(ForeignKey(User.id), nullable=True, index=True)
     chat_id: Mapped[Optional[uuid.UUID]] = mapped_column(ForeignKey(Chat.id))
     
     # Analysis metadata
@@ -63,7 +63,7 @@ class TenderAnalysis(Base):
         return {
             "id": str(self.id),
             "tender_id": self.tender_id,
-            "user_id": str(self.user_id),
+            "user_id": str(self.user_id) if self.user_id else None,
             "chat_id": str(self.chat_id) if self.chat_id else None,
             "status": self.status.value if self.status else None,
             "progress": self.progress,

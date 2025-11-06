@@ -30,7 +30,7 @@ class AnalyzeRepository:
         """Retrieves a tender analysis record by its own ID."""
         return self.db.query(TenderAnalysis).filter_by(id=analysis_id).first()
 
-    def create_for_tender(self, tender_id: str, user_id: UUID) -> TenderAnalysis:
+    def create_for_tender(self, tender_id: str, user_id: Optional[UUID]) -> TenderAnalysis:
         """
         Creates a new, pending tender analysis record for a given tender.
         """
