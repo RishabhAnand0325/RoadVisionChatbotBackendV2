@@ -35,3 +35,10 @@ class DataSheetSchema(BaseModel):
     key_tender_details: Dict[str, Any] = {}
     financial_summary: Dict[str, Any] = {}
     timeline: Dict[str, Any] = {}
+
+
+class SSEEvent(BaseModel):
+    """Defines the structure of a Server-Sent Event."""
+    event: str  # e.g., 'update', 'status_change', 'error', 'complete'
+    field: str  # e.g., 'one_pager', 'status', 'scope_of_work.project_overview'
+    data: Any

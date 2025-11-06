@@ -36,15 +36,11 @@ This part focuses on building the background task that performs the analysis and
 -   **[ ] Create the Main Analysis Task**
     -   **Goal:** Create a Celery task that orchestrates the entire analysis process.
     -   **Tasks:**
+        -   `[ ]` Create `app/modules/tenderiq/analyze/db/repository.py` to handle database operations for `TenderAnalysis`.
+        -   `[ ]` Create `app/modules/tenderiq/analyze/events.py` for publishing updates to Redis Pub/Sub.
         -   `[ ]` Create `app/modules/tenderiq/analyze/tasks.py`.
         -   `[ ]` Define a Celery task `run_tender_analysis(analysis_id)` that will serve as the main entry point.
-        -   `[ ]` This task will be responsible for calling all the sub-services (parsing, one-pager, etc.) in the correct order.
-
--   **[ ] Implement Progress Publishing**
-    -   **Goal:** Enable the Celery task to broadcast real-time updates.
-    -   **Tasks:**
-        -   `[ ]` Create a utility function that takes an `analysis_id` and a data payload, and publishes it to a Redis Pub/Sub channel (e.g., `analysis:{analysis_id}`).
-        -   `[ ]` The Celery task will call this function at the beginning and end of each step (e.g., publish a "pending" status, then the final result for the one-pager).
+        -   `[ ]` The task will use the repository to update the database at each step and the event publisher to broadcast those updates.
 
 -   **[ ] Build Analysis Sub-Services**
     -   **Goal:** Create modular services for each part of the analysis.
@@ -64,13 +60,13 @@ This part involves creating the user-facing endpoint that streams the analysis r
 -   **[ ] Create the SSE Endpoint**
     -   **Goal:** Develop the `GET /tenderiq/analyze/{tender_id}` endpoint.
     -   **Tasks:**
-        -   `[ ]` Create `app/modules/tenderiq/analyze/endpoints/endpoints.py` and define the route.
+        -   `[ ]` Create `app/modules/tenderiq/analyze/endpoints/endpoints.py` and a corresponding router in `app/modules/tenderiq/analyze/router.py`.
         -   `[ ]` Implement the endpoint logic:
-            1.  On a new connection, check the database for an existing `TenderAnalysis` record.
-            2.  If the record doesn't exist, create one and trigger the `run_tender_analysis` Celery task.
-            3.  Immediately stream any data already in the database record to the client.
-            4.  Subscribe to the Redis Pub/Sub channel for the analysis.
-            5.  Listen for new messages and stream them to the client as SSE events.
+            1.  On a new request, check the database via the repository for an existing `TenderAnalysis` record.
+            2.  **If no record exists:** Create one, set status to `pending`, and trigger the `run_tender_analysis` Celery task.
+            3.  **If a record exists with status `completed` or `failed`:** Stream all data from the database record at once and close the connection.
+            4.  **If a record exists with status `pending` or `analyzing`:** Stream any existing data from the database record.
+            5.  For new or in-progress analyses, subscribe to the Redis Pub/Sub channel and stream live updates to the client.
 
 -   **[ ] Define SSE Event Models**
     -   **Goal:** Standardize the format of the messages sent over the stream.
