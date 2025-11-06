@@ -99,12 +99,12 @@ def scrape_page(url) -> HomePageData:
             title_elem = mainTR.find('p', attrs={'class': 'm-r-td-title'})
             if not title_elem:
                 raise Exception("Title not found")
-            title = title_elem.text
+            title = title_elem.text.strip()
 
             state_elem = mainTR.find('p', attrs={'class': 'm-td-state'})
             if not state_elem:
                 raise Exception("Date not found")
-            state = state_elem.text
+            state = state_elem.text.strip()
 
             m_td_brief_elements = mainTR.find_all('p', attrs={'class': 'm-td-brief'})
             if not len(m_td_brief_elements) == 3:
@@ -114,10 +114,10 @@ def scrape_page(url) -> HomePageData:
             tender_id_elem = summary_elem.find('strong')
             if not tender_id_elem:
                 raise Exception("Tender ID not found")
-            tender_id = tender_id_elem.text.split(':')[1]
+            tender_id = tender_id_elem.text.split(':')[1].strip()
 
-            tender_value = m_td_brief_elements[1].text.split(':')[1]
-            due_date = m_td_brief_elements[2].text.split(':')[1]
+            tender_value = m_td_brief_elements[1].text.split(':')[1].strip()
+            due_date = m_td_brief_elements[2].text.split(':')[1].strip()
 
             link_elem = mainTR.find('a')
             if not link_elem:

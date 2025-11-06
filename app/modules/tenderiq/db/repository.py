@@ -81,10 +81,14 @@ class TenderRepository:
         if not date_str:
             return None
         try:
-            # Assumes "DD-MM-YYYY" format from ScrapedTender
-            return datetime.strptime(date_str, "%d-%m-%Y")
+            # Assumes "DD-Mon-YYYY" format from ScrapedTender e.g. "08-Nov-2025"
+            return datetime.strptime(date_str, "%d-%b-%Y")
         except (ValueError, TypeError):
-            return None
+            # Fallback for other potential formats if needed in the future
+            try:
+                return parser.parse(date_str)
+            except (parser.ParserError, TypeError):
+                return None
 
     def get_tenders_by_flag(self, flag_name: str, flag_value: bool = True) -> list[Tender]:
         """
