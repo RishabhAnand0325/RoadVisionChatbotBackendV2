@@ -72,7 +72,7 @@ def get_tender_details(
 
 
 @router.get(
-    "/tenders/wishlist",
+    "/wishlist",
     response_model=list[Tender],
     tags=["TenderIQ"],
     summary="Get all wishlisted tenders"
@@ -84,7 +84,7 @@ def get_wishlisted_tenders(db: Session = Depends(get_db_session)):
 
 
 @router.get(
-    "/tenders/archived",
+    "/archived",
     response_model=list[Tender],
     tags=["TenderIQ"],
     summary="Get all archived tenders"
@@ -96,7 +96,7 @@ def get_archived_tenders(db: Session = Depends(get_db_session)):
 
 
 @router.get(
-    "/tenders/favourite",
+    "/favourite",
     response_model=list[Tender],
     tags=["TenderIQ"],
     summary="Get all favorite tenders"
