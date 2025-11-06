@@ -18,6 +18,7 @@ import os
 from app.db.database import SessionLocal
 from app.modules.scraper.db.repository import ScraperRepository
 from .detail_page_scrape import scrape_tender
+from .process_tender import start_tender_processing
 # from .drive import authenticate_google_drive, download_folders, get_shareable_link, upload_folder_to_drive
 from .email_sender import listen_and_get_link, listen_and_get_unprocessed_emails, send_html_email
 from .home_page_scrape import scrape_page
@@ -154,6 +155,12 @@ def scrape_link(link: str, source_priority: str = "normal", skip_dedup_check: bo
                         logger.debug(f"🎯 Scraping detail page for: {tender.tender_name}")
                         tender.details = scrape_tender(tender.tender_url)
                         logger.debug(f"✅ Detail page scraped: {tender.tender_name}")
+
+                        # Start the analysis process for the scraped tender details
+                        if tender.details:
+                            logger.debug(f"🔬 Starting analysis for: {tender.tender_name}")
+                            start_tender_processing(tender.details)
+                            logger.debug(f"✅ Analysis complete for: {tender.tender_name}")
                     except Exception as e:
                         logger.warning(f"⚠️  Failed to scrape details for {tender.tender_name}: {str(e)}")
                         tenders_to_remove.append(tender)
