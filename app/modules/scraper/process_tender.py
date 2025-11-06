@@ -9,6 +9,9 @@ from app.modules.scraper.data_models import TenderDetailPage
 from app.core.services import vector_store, pdf_processor, weaviate_client, excel_processor, llm_model
 from app.core.global_stores import upload_jobs
 from app.db.database import SessionLocal
+from app.modules.scraper.db.schema import ScrapedTender
+from app.modules.tenderiq.db.repository import TenderRepository
+from app.modules.tenderiq.models.pydantic_models import ReviewStatusEnum
 from app.modules.tenderiq.analyze.db.repository import AnalyzeRepository
 from app.modules.tenderiq.analyze.db.schema import AnalysisStatusEnum
 from app.modules.tenderiq.analyze.models.pydantic_models import OnePagerSchema
@@ -107,7 +110,19 @@ def start_tender_processing(tender: TenderDetailPage):
     # 5. LLM magic for analysis
     print(f"\n--- Starting LLM analysis for Tender ID: {tender_id} ---")
     db = SessionLocal()
+    scraped_tender_orm = None
+    main_tender_orm = None
     try:
+        # Get DB records to update their status
+        scraped_tender_orm = db.query(ScrapedTender).filter(ScrapedTender.tdr == tender_id).first()
+        if not scraped_tender_orm:
+            print(f"⚠️  ScrapedTender ORM object not found for TDR {tender_id}. Cannot update analysis status.")
+        else:
+            tender_repo = TenderRepository(db)
+            main_tender_orm = tender_repo.get_or_create_by_id(scraped_tender_orm)
+            if not main_tender_orm:
+                print(f"⚠️  Tender ORM object not found/created for TDR {tender_id}. Cannot update tender status.")
+        
         # Define a helper for LLM extraction
         def _extract_from_tender(question: str) -> str:
             """Queries Weaviate for context and asks the LLM a question."""
@@ -166,6 +181,14 @@ ANSWER:"""
 
         # e. Finalize analysis
         analyze_repo.update(analysis, {"status": AnalysisStatusEnum.completed, "status_message": "Analysis complete."})
+
+        if scraped_tender_orm:
+            scraped_tender_orm.analysis_status = "completed"
+            scraped_tender_orm.error_message = None
+        if main_tender_orm:
+            main_tender_orm.review_status = ReviewStatusEnum.Reviewed
+        db.commit()
+
         print(f"--- ✅ LLM Analysis for Tender ID: {tender_id} complete ---")
 
     except Exception as e:
@@ -173,5 +196,10 @@ ANSWER:"""
         traceback.print_exc()
         if 'analysis' in locals() and analysis and 'analyze_repo' in locals():
             analyze_repo.update(analysis, {"status": AnalysisStatusEnum.failed, "error_message": str(e)})
+        
+        if scraped_tender_orm:
+            scraped_tender_orm.analysis_status = "failed"
+            scraped_tender_orm.error_message = str(e)
+            db.commit()
     finally:
         db.close()
