@@ -1,10 +1,17 @@
 import os
 import requests
 import tempfile
+import traceback
 import uuid
 
 from app.modules.scraper.data_models import TenderDetailPage
-from app.core.services import vector_store, pdf_processor, weaviate_client, excel_processor
+from app.core.services import vector_store, pdf_processor, weaviate_client, excel_processor, llm_model
+from app.db.database import SessionLocal
+from app.modules.scraper.db.schema import ScrapedTender
+from app.modules.tenderiq.db.repository import TenderRepository
+from app.modules.tenderiq.analyze.db.repository import AnalyzeRepository
+from app.modules.tenderiq.analyze.db.schema import AnalysisStatusEnum
+from app.modules.tenderiq.analyze.models.pydantic_models import OnePagerSchema
 
 
 def start_tender_processing(tender: TenderDetailPage):
@@ -83,6 +90,86 @@ def start_tender_processing(tender: TenderDetailPage):
         except Exception as e:
             print(f"❌ Failed during Weaviate operation for tender {tender_id}: {e}")
 
-    print(f"--- Finished processing for Tender ID: {tender_id} ---")
+    print(f"--- Finished vector processing for Tender ID: {tender_id} ---")
 
-    # 5. LLM magic (to be implemented later)
+    # 5. LLM magic for analysis
+    print(f"\n--- Starting LLM analysis for Tender ID: {tender_id} ---")
+    db = SessionLocal()
+    try:
+        # Define a helper for LLM extraction
+        def _extract_from_tender(question: str) -> str:
+            """Queries Weaviate for context and asks the LLM a question."""
+            print(f"  ❓ Querying tender '{tender_id}' with: '{question}'")
+            context_chunks = vector_store.query_tender(tender_id, question, n_results=5)
+            
+            if not context_chunks:
+                print("  ⚠️ No context found in vector store.")
+                return "Not found in documents."
+
+            context_text = "\n\n".join([chunk[0] for chunk in context_chunks])
+
+            prompt = f"""Based on the following context from tender documents, answer the user's question.
+If the information is not in the context, say "Not found in documents.". Be concise.
+
+CONTEXT:
+---
+{context_text}
+---
+
+QUESTION: {question}
+
+ANSWER:"""
+
+            try:
+                response = llm_model.generate_content(prompt)
+                answer = response.text.strip()
+                print(f"  🗣️ LLM Response: {answer[:100].replace('\n', ' ')}...")
+                return answer
+            except Exception as e:
+                print(f"  ❌ LLM generation failed: {e}")
+                return f"Error during generation: {e}"
+
+        # a. Get the ScrapedTender and then the main Tender record
+        scraped_tender = db.query(ScrapedTender).filter(ScrapedTender.tender_id_str == tender_id).first()
+        if not scraped_tender:
+            print(f"❌ ScrapedTender with ID string {tender_id} not found. Aborting analysis.")
+            return
+
+        tender_repo = TenderRepository(db)
+        main_tender = tender_repo.get_or_create_by_id(scraped_tender)
+        
+        # b. Create a TenderAnalysis record
+        analyze_repo = AnalyzeRepository(db)
+        system_user_id = uuid.UUID('00000000-0000-0000-0000-000000000000') 
+        analysis = analyze_repo.create_for_tender(main_tender.id, system_user_id)
+        
+        analyze_repo.update(analysis, {"status": AnalysisStatusEnum.analyzing, "status_message": "Generating One-Pager..."})
+
+        # c. Extract data for One-Pager
+        print("\n📄 Generating One-Pager...")
+        one_pager_data = {
+            "project_overview": _extract_from_tender("Provide a brief overview of the project described in the tender."),
+            "eligibility_highlights": _extract_from_tender("List the key eligibility requirements for bidders as bullet points.").split('\n'),
+            "important_dates": _extract_from_tender("List the important dates and deadlines mentioned in the tender.").split('\n'),
+            "financial_requirements": _extract_from_tender("Summarize the key financial requirements, like EMD, tender value, and performance security.").split('\n'),
+            "risk_analysis": {"summary": _extract_from_tender("Identify potential risks for the project or bidder based on the document.")}
+        }
+        
+        # d. Validate with Pydantic model and save
+        one_pager = OnePagerSchema(**one_pager_data)
+        analyze_repo.update(analysis, {"one_pager_json": one_pager.model_dump()})
+        print("  ✅ One-Pager generated and saved.")
+
+        # TODO: Repeat for ScopeOfWorkSchema and DataSheetSchema here
+
+        # e. Finalize analysis
+        analyze_repo.update(analysis, {"status": AnalysisStatusEnum.completed, "status_message": "Analysis complete."})
+        print(f"--- ✅ LLM Analysis for Tender ID: {tender_id} complete ---")
+
+    except Exception as e:
+        print(f"❌ An error occurred during LLM analysis for tender {tender_id}: {e}")
+        traceback.print_exc()
+        if 'analysis' in locals() and analysis and 'analyze_repo' in locals():
+            analyze_repo.update(analysis, {"status": AnalysisStatusEnum.failed, "error_message": str(e)})
+    finally:
+        db.close()
