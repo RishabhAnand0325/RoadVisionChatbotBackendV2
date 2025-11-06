@@ -4,8 +4,10 @@ import tempfile
 import traceback
 import uuid
 
+from app.modules.askai.models.document import ProcessingStage, ProcessingStatus, UploadJob
 from app.modules.scraper.data_models import TenderDetailPage
 from app.core.services import vector_store, pdf_processor, weaviate_client, excel_processor, llm_model
+from app.core.global_stores import upload_jobs
 from app.db.database import SessionLocal
 from app.modules.scraper.db.schema import ScrapedTender
 from app.modules.tenderiq.db.repository import TenderRepository
@@ -53,6 +55,18 @@ def start_tender_processing(tender: TenderDetailPage):
                 # The process_pdf method handles both extraction and chunking.
                 doc_id = str(uuid.uuid4())
                 job_id = str(uuid.uuid4()) # For progress tracking within the processor
+
+                upload_jobs[job_id] = UploadJob(
+                    job_id = job_id,
+                    status=ProcessingStatus.QUEUED,
+                    chat_id=str(tender_id),
+                    filename=file_info.file_name or "unknown-file.pdf",
+                    progress=0,
+                    stage=ProcessingStage.NOT_PROCESSING,
+                    finished_at="",
+                    chunks_added=0,
+                    error=None
+                )
 
                 # NOTE: Assuming all files are PDFs for now.
                 if file_info.file_name.lower().endswith('.pdf'):
