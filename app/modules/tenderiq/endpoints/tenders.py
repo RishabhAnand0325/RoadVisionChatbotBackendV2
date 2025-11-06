@@ -4,7 +4,7 @@ from typing import Optional
 from uuid import UUID
 
 from app.db.database import get_db_session
-from app.modules.auth.dependencies import get_current_active_user
+from app.modules.auth.services.auth_service import get_current_active_user
 from app.modules.auth.db.schema import User
 from app.modules.tenderiq.models.pydantic_models import (
     DailyTendersResponse,
