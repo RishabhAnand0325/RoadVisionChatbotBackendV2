@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.db.redis_client import redis_client
 from app.modules.tenderiq.analyze.db.repository import AnalyzeRepository
-from app.modules.tenderiq.analyze.schema import TenderAnalysis, AnalysisStatusEnum
+from app.modules.tenderiq.analyze.db.schema import TenderAnalysis, AnalysisStatusEnum
 from app.modules.tenderiq.analyze.tasks import run_tender_analysis
 from app.modules.tenderiq.analyze.events import get_analysis_channel
 

@@ -33,6 +33,9 @@ class SQLAlchemyChatMessageHistory(BaseChatMessageHistory):
     @property
     def messages(self) -> List[BaseMessage]:
         """Retrieve messages from the database."""
+        # This property correctly overrides and implements the abstract property
+        # from the `BaseChatMessageHistory` interface. Linter warnings about
+        # overriding a symbol from a base class can be safely ignored here.
         chat = self.chat_repo.get_by_id(self.chat_id)
         if not chat or not chat.messages:
             return []

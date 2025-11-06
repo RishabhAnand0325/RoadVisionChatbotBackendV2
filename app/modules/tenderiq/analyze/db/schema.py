@@ -60,6 +60,26 @@ class TenderAnalysis(Base):
     rfp_sections: Mapped[List["AnalysisRFPSection"]] = relationship(back_populates="analysis", cascade="all, delete-orphan")
     document_templates: Mapped[List["AnalysisDocumentTemplate"]] = relationship(back_populates="analysis", cascade="all, delete-orphan")
 
+    def to_dict(self):
+        """Converts the SQLAlchemy model instance to a dictionary."""
+        return {
+            "id": str(self.id),
+            "tender_id": str(self.tender_id),
+            "user_id": str(self.user_id),
+            "chat_id": str(self.chat_id) if self.chat_id else None,
+            "status": self.status.value if self.status else None,
+            "progress": self.progress,
+            "status_message": self.status_message,
+            "error_message": self.error_message,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "analysis_started_at": self.analysis_started_at.isoformat() if self.analysis_started_at else None,
+            "analysis_completed_at": self.analysis_completed_at.isoformat() if self.analysis_completed_at else None,
+            "one_pager_json": self.one_pager_json,
+            "scope_of_work_json": self.scope_of_work_json,
+            "data_sheet_json": self.data_sheet_json,
+        }
+
 
 class AnalysisRFPSection(Base):
     """
