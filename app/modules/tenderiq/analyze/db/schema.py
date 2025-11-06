@@ -9,6 +9,8 @@ from sqlalchemy.orm import relationship, Mapped, mapped_column
 
 from app.db.database import Base
 from app.modules.tenderiq.db.schema import Tender
+from app.modules.auth.db.schema import User
+from app.modules.askai.db.models import Chat
 from ..models.pydantic_models import OnePagerSchema, ScopeOfWorkSchema, DataSheetSchema
 
 
@@ -31,6 +33,8 @@ class TenderAnalysis(Base):
     
     # One-to-one relationship to the Tender being analyzed
     tender_id: Mapped[uuid.UUID] = mapped_column(postgresql.UUID(as_uuid=True), ForeignKey(Tender.id), nullable=False, unique=True, index=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey(User.id), nullable=False, index=True)
+    chat_id: Mapped[Optional[uuid.UUID]] = mapped_column(ForeignKey(Chat.id))
     
     # Analysis metadata
     status: Mapped[AnalysisStatusEnum] = mapped_column(postgresql.ENUM(AnalysisStatusEnum, name='analysisstatusenum', create_type=False), default=AnalysisStatusEnum.pending, nullable=False, index=True)
@@ -51,6 +55,8 @@ class TenderAnalysis(Base):
 
     # Relationships
     tender: Mapped["Tender"] = relationship(backref="analysis", uselist=False)
+    user: Mapped["User"] = relationship()
+    chat: Mapped[Optional["Chat"]] = relationship()
     rfp_sections: Mapped[List["AnalysisRFPSection"]] = relationship(back_populates="analysis", cascade="all, delete-orphan")
     document_templates: Mapped[List["AnalysisDocumentTemplate"]] = relationship(back_populates="analysis", cascade="all, delete-orphan")
 

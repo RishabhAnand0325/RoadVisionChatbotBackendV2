@@ -33,16 +33,16 @@ These tasks involve setting up the core infrastructure that the real-time analys
 
 This part focuses on building the background task that performs the analysis and publishes updates.
 
--   **[ ] Create the Main Analysis Task**
+-   **[x] Create the Main Analysis Task**
     -   **Goal:** Create a Celery task that orchestrates the entire analysis process.
     -   **Tasks:**
-        -   `[ ]` Create `app/modules/tenderiq/analyze/db/repository.py` to handle database operations for `TenderAnalysis`.
-        -   `[ ]` Create `app/modules/tenderiq/analyze/events.py` for publishing updates to Redis Pub/Sub.
-        -   `[ ]` Create `app/modules/tenderiq/analyze/tasks.py`.
-        -   `[ ]` Define a Celery task `run_tender_analysis(analysis_id)` that will serve as the main entry point.
-        -   `[ ]` The task will use the repository to update the database at each step and the event publisher to broadcast those updates.
+        -   `[x]` Create `app/modules/tenderiq/analyze/db/repository.py` to handle database operations for `TenderAnalysis`.
+        -   `[x]` Create `app/modules/tenderiq/analyze/events.py` for publishing updates to Redis Pub/Sub.
+        -   `[x]` Create `app/modules/tenderiq/analyze/tasks.py`.
+        -   `[x]` Define a Celery task `run_tender_analysis(analysis_id)` that will serve as the main entry point.
+        -   `[x]` The task will use the repository to update the database at each step and the event publisher to broadcast those updates.
 
--   **[ ] Build Analysis Sub-Services**
+-   **[x] Build Analysis Sub-Services**
     -   **Goal:** Create modular services for each part of the analysis.
     -   **Tasks:**
         -   `[ ]` **Document Parsing Service:** A service that reuses `askai`'s `PDFProcessor` to extract text and save it to the vector store.
@@ -57,18 +57,18 @@ This part focuses on building the background task that performs the analysis and
 
 This part involves creating the user-facing endpoint that streams the analysis results.
 
--   **[ ] Create the SSE Endpoint**
+-   **[x] Create the SSE Endpoint**
     -   **Goal:** Develop the `GET /tenderiq/analyze/{tender_id}` endpoint.
     -   **Tasks:**
-        -   `[ ]` Create `app/modules/tenderiq/analyze/endpoints/endpoints.py` and a corresponding router in `app/modules/tenderiq/analyze/router.py`.
-        -   `[ ]` Implement the endpoint logic:
+        -   `[x]` Create `app/modules/tenderiq/analyze/endpoints/endpoints.py` and a corresponding router in `app/modules/tenderiq/analyze/router.py`.
+        -   `[x]` Implement the endpoint logic:
             1.  On a new request, check the database via the repository for an existing `TenderAnalysis` record.
             2.  **If no record exists:** Create one, set status to `pending`, and trigger the `run_tender_analysis` Celery task.
             3.  **If a record exists with status `completed` or `failed`:** Stream all data from the database record at once and close the connection.
             4.  **If a record exists with status `pending` or `analyzing`:** Stream any existing data from the database record.
             5.  For new or in-progress analyses, subscribe to the Redis Pub/Sub channel and stream live updates to the client.
 
--   **[ ] Define SSE Event Models**
+-   **[x] Define SSE Event Models**
     -   **Goal:** Standardize the format of the messages sent over the stream.
     -   **Tasks:**
-        -   `[ ]` Create Pydantic models in `app/modules/tenderiq/analyze/models/pydantic_models.py` to define the structure of the SSE events (e.g., `{ "event": "update", "field": "one_pager.project_overview", "data": "..." }`).
+        -   `[x]` Create Pydantic models in `app/modules/tenderiq/analyze/models/pydantic_models.py` to define the structure of the SSE events (e.g., `{ "event": "update", "field": "one_pager.project_overview", "data": "..." }`).
