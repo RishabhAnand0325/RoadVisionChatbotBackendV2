@@ -140,6 +140,9 @@ def scrape_page(url) -> HomePageData:
 
     query_table: List[TenderQuery] = []
     for (query_name, no_of_tenders), tenders_list in zip(queries_and_numbers, tenders_list_list):
+        # For now, add only categories that have "Civil" in their name
+        if "Civil" not in query_name:
+            continue
         query_table.append(TenderQuery(
             query_name=query_name,
             number_of_tenders=no_of_tenders,

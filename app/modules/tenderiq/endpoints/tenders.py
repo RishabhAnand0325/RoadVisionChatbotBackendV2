@@ -9,6 +9,7 @@ from app.modules.auth.db.schema import User
 from app.modules.tenderiq.models.pydantic_models import (
     DailyTendersResponse,
     AvailableDatesResponse,
+    FullTenderDetails,
     HistoryAndWishlistResponse,
     Tender,
     FilteredTendersResponse,
@@ -71,6 +72,18 @@ def get_tender_details(
         )
     return tender_details
 
+## TODO: Implement this endpoint. It will replace /tenders/{tender_id} later
+@router.get(
+    "/tenders/{tender_id}/full",
+    response_model=FullTenderDetails,
+    tags=["TenderIQ"],
+    summary="Get detailed information for a single tender",
+)
+def get_full_tender_details(
+    tender_id: UUID,
+    db: Session = Depends(get_db_session)
+):
+    pass
 
 @router.get(
     "/wishlist",

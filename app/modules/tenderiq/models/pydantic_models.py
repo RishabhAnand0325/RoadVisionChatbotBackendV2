@@ -4,6 +4,8 @@ from uuid import UUID
 from datetime import datetime
 from enum import Enum
 
+from app.modules.tenderiq.db.schema import TenderActionEnum
+
 
 # ==================== Tender Models ====================
 
@@ -124,6 +126,126 @@ class HistoryData(BaseModel):
 class HistoryAndWishlistResponse(BaseModel):
     report_file_url: str
     tenders: List[HistoryData]
+
+# ==================== Response Models - Full Tender Details ====================
+class AnalysisStatusEnum(str, Enum):
+    PENDING = "pending"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+    COMPLETED = "completed"
+
+class StatusEnum(str, Enum):
+    NEW = "new"
+    REVIEWED = "reviewed"
+    SHORTLISTED = "shortlisted"
+    BID_PREPARATION = "bid_preparation"
+    SUBMITTED = "submitted"
+    WON = "won"
+    LOST = "lost"
+    NOT_INTERESTED = "not_interested"
+    PENDING_RESULTS = "pending_results"
+
+class HistoryItem(BaseModel):
+    """Logs specific user-driven actions on a tender for history tracking."""
+    id: str
+    tender_id: str
+    user_id: str
+    action: TenderActionEnum
+    notes: str
+    timestamp: datetime
+
+class FullTenderDetails(BaseModel):
+    ## From ScrapedTender
+    id: str
+
+    # From Tender model
+    tender_id_str: str
+    tender_name: str
+    tender_url: str
+    # dms_folder_id = Column(UUID(as_uuid=True), nullable=True)
+    city: str
+    summary: str
+    value: str
+    due_date: str
+
+    analysis_status: AnalysisStatusEnum
+    error_message: str
+
+    query_id: str
+    query: str
+
+    # From TenderDetailPage models
+    # TenderDetailNotice
+    tdr: str
+    tendering_authority: str
+    tender_no: str
+    tender_id_detail: str
+    tender_brief: str
+    # city is already there from Tender model
+    state: str
+    document_fees: str
+    emd: str
+    tender_value: str
+    tender_type: str
+    bidding_type: str
+    competition_type: str
+
+    # TenderDetailDetails
+    tender_details: str
+
+    # TenderDetailKeyDates
+    publish_date: str
+    last_date_of_bid_submission: str
+    tender_opening_date: str
+
+    # TenderDetailContactInformation
+    company_name: str
+    contact_person: str
+    address: str
+
+    # TenderDetailOtherDetail
+    information_source: str
+
+    files: List[TenderFile]
+
+    ## From Tender
+    id: str
+    tender_ref_number: str
+    tender_title: str
+    description: str
+    employer_name: str
+    employer_address: str
+    issuing_authority: str
+    state: str
+    location: str
+    category: str
+    mode: str
+    estimated_cost: int
+    bid_security: int
+    length_km: int
+    per_km_cost: int
+    span_length: int
+    road_work_amount: int
+    structure_work_amount: int
+    e_published_date: datetime
+    identification_date: datetime
+    submission_deadline: datetime
+    prebid_meeting_date: datetime
+    site_visit_deadline: datetime
+    portal_source: str
+    portal_url: str
+    document_url: str
+    status: StatusEnum
+    review_status: ReviewStatusEnum
+    reviewed_by_id: str
+    reviewed_at: datetime
+    created_at: datetime
+    updated_at: datetime
+    is_favorite: bool
+    is_archived: bool
+    is_wishlisted: bool
+    history: List[HistoryItem]
+
 
 # ==================== Response Models - Analysis Metadata ====================
 
