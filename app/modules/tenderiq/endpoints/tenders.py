@@ -9,6 +9,7 @@ from app.modules.auth.db.schema import User
 from app.modules.tenderiq.models.pydantic_models import (
     DailyTendersResponse,
     AvailableDatesResponse,
+    HistoryAndWishlistResponse,
     Tender,
     FilteredTendersResponse,
     TenderActionRequest,
@@ -82,6 +83,16 @@ def get_wishlisted_tenders(db: Session = Depends(get_db_session)):
     service = TenderFilterService()
     return service.get_wishlisted_tenders(db)
 
+@router.get(
+    "/history-wishlist",
+    response_model=HistoryAndWishlistResponse,
+    tags=["TenderIQ"],
+    summary="Get all wishlisted tenders along with actions history"
+)
+def get_wishlisted_tenders_with_history(db: Session = Depends(get_db_session)):
+    """Retrieves all tenders that have been marked as wishlisted."""
+    service = TenderFilterService()
+    return service.get_wishlisted_tenders_with_history(db)
 
 @router.get(
     "/archived",

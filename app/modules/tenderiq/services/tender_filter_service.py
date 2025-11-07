@@ -10,7 +10,8 @@ This service handles business logic for:
 - Applying additional filters (category, location, value)
 """
 
-from typing import Optional
+import re
+from typing import List, Optional
 from uuid import UUID
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
@@ -20,6 +21,9 @@ from app.modules.tenderiq.db.tenderiq_repository import TenderIQRepository
 from app.modules.tenderiq.models.pydantic_models import (
     AvailableDatesResponse,
     FilteredTendersResponse,
+    HistoryAndWishlistResponse,
+    HistoryData,
+    HistoryDataResultsEnum,
     ScrapeDateInfo,
     Tender,
     DailyTendersResponse,
@@ -33,6 +37,38 @@ class TenderFilterService:
     def __init__(self):
         """Initialize the service"""
         pass
+
+    def get_wishlisted_tenders_with_history(self, db: Session) -> HistoryAndWishlistResponse:
+        """
+        Get wishlisted tenders with history.
+        """
+        repo = TenderIQRepository(db)
+        wishlist = repo.get_wishlisted_tenders()
+        history_data_list: List[HistoryData] = []
+
+        for tender in wishlist:
+            tenders_table = tender.tuple()[0]
+            scraped_tender_table = tender.tuple()[1]
+            history_data = HistoryData(
+                id=str(tenders_table.id),
+                title=str(tenders_table.tender_title),
+                authority=str(tenders_table.employer_name),
+                value=int(self._convert_word_currency_to_number(str(scraped_tender_table.value))),
+                emd=int(self._convert_word_currency_to_number(str(scraped_tender_table.emd))),
+                due_date=str(scraped_tender_table.due_date),
+                category=str(tenders_table.category),
+                progress=0,
+                analysis_state=False,
+                synopsis_state=False,
+                evaluated_state=False,
+                results=HistoryDataResultsEnum.PENDING,
+            )
+            history_data_list.append(history_data)
+
+        return HistoryAndWishlistResponse(
+            tenders=history_data_list,
+            report_file_url="https://tenderiq.s3.amazonaws.com/2023/05/09/4b7b4c9b-9d3d-4e8a-9e3e-8b6e5f1a2b3c/wishlist_report.pdf",
+        )
 
     def get_tender_details(self, db: Session, tender_id: UUID) -> Optional[Tender]:
         """
@@ -316,6 +352,35 @@ class TenderFilterService:
         raise ValueError("No tenders found in the database")
 
     # ==================== Helper Methods ====================
+
+    def _convert_word_currency_to_number(self, word: str) -> float:
+        """
+        Convert a word to a number in crore, lakh, thuosand (e.g., "6.6 crore" -> 66000000).
+
+        Args:
+            word: Word to convert
+
+        Returns:
+            Number in float
+        """
+        word = word.lower()
+        if "crore" in word:
+            number_str = word.replace("crore", "").strip()
+            return float(number_str) * 10000000
+        elif "lakh" in word:
+            number_str = word.replace("lakh", "").strip()
+            return float(number_str) * 100000
+        elif "thousand" in word:
+            number_str = word.replace("thousand", "").strip()
+            return float(number_str) * 1000
+        else:
+            word = word.split(".")[0]
+            regexed = re.sub("[^0-9]", "", word)
+            if regexed:
+                return float(regexed)
+
+            return 0.0
+
 
     def _get_available_dates_list(self, db: Session) -> list[str]:
         """
