@@ -8,9 +8,10 @@ This separation ensures TenderIQ module doesn't directly depend on ScraperReposi
 making the modules properly decoupled and independently testable.
 """
 
-from typing import Optional
+from typing import List, Optional
 from uuid import UUID
 from datetime import datetime, timedelta
+from sqlalchemy import Row, Tuple
 from sqlalchemy.orm import Session, joinedload
 
 from app.modules.scraper.db.schema import (
@@ -18,6 +19,7 @@ from app.modules.scraper.db.schema import (
     ScrapedTender,
     ScrapedTenderQuery,
 )
+from app.modules.tenderiq.db.schema import Tender
 
 
 class TenderIQRepository:
@@ -25,6 +27,12 @@ class TenderIQRepository:
 
     def __init__(self, db: Session):
         self.db = db
+
+    def get_wishlisted_tenders(self) -> List[Row[tuple[Tender, ScrapedTender]]]:
+        """
+        Get all tenders that have been marked as wishlisted.
+        """
+        return self.db.query(Tender, ScrapedTender).join(ScrapedTender, Tender.id == ScrapedTender.id).filter(Tender.is_wishlisted).all()
 
     def get_tender_by_id(self, tender_id: UUID) -> Optional[ScrapedTender]:
         """

@@ -98,6 +98,32 @@ class TenderActionRequest(BaseModel):
     action: TenderActionType
     payload: Optional[TenderActionPayload] = None
 
+# ==================== Response Models - History And Wishlist ====================
+class HistoryDataResultsEnum(str, Enum):
+    WON = "won"
+    REJECTED = "rejected"
+    INCOMPLETE = "incomplete"
+    PENDING = "pending"
+
+class HistoryData(BaseModel):
+    id: str
+    title: str;
+    authority: str;
+    value: int;
+    emd: int;
+    due_date: str;
+    category: str;
+    progress: int;
+    analysis_state: bool;
+    synopsis_state: bool;
+    evaluated_state: bool;
+    # results: "won" | "rejected" | "incomplete" | "pending";
+    results: HistoryDataResultsEnum;
+
+
+class HistoryAndWishlistResponse(BaseModel):
+    report_file_url: str
+    tenders: List[HistoryData]
 
 # ==================== Response Models - Analysis Metadata ====================
 
