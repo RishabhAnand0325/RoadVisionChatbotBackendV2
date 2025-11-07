@@ -1,10 +1,10 @@
 import uuid
+import enum
 from datetime import datetime, timezone
 from sqlalchemy import (Column, String, DateTime, ForeignKey, Text, JSON,
-                        Integer, Boolean, Enum, Numeric, Float)
+Integer, Boolean, Enum, Numeric, Float)
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
-
 from app.db.database import Base
 
 class Tender(Base):
@@ -44,7 +44,6 @@ class Tender(Base):
     is_favorite = Column(Boolean, default=False)
     is_archived = Column(Boolean, default=False)
     is_wishlisted = Column(Boolean, default=False, index=True)
-
     history = relationship("TenderActionHistory", back_populates="tender", cascade="all, delete-orphan")
 
 
@@ -59,6 +58,7 @@ class TenderDocument(Base):
     uploaded_by_id = Column(UUID(as_uuid=True), ForeignKey('users.id'))
     uploaded_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
+
 class TenderComparison(Base):
     __tablename__ = 'tender_comparisons'
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -67,6 +67,7 @@ class TenderComparison(Base):
     comparison_report = Column(JSON)
     created_by_id = Column(UUID(as_uuid=True), ForeignKey('users.id'))
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
 
 class TenderTeam(Base):
     __tablename__ = 'tender_team'
@@ -77,6 +78,7 @@ class TenderTeam(Base):
     assigned_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     assigned_by_id = Column(UUID(as_uuid=True), ForeignKey('users.id'))
 
+
 class TenderNote(Base):
     __tablename__ = 'tender_notes'
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -86,8 +88,6 @@ class TenderNote(Base):
     parent_note_id = Column(UUID(as_uuid=True), ForeignKey('tender_notes.id'), nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     is_important = Column(Boolean, default=False)
-
-import enum
 
 
 class TenderActionEnum(str, enum.Enum):
@@ -111,7 +111,6 @@ class TenderActionHistory(Base):
     action = Column(Enum(TenderActionEnum), nullable=False)
     notes = Column(Text, nullable=True)
     timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
-
     tender = relationship("Tender", back_populates="history")
     user = relationship("User")
 
@@ -124,3 +123,78 @@ class TenderActivityLog(Base):
     action_type = Column(String)
     action_details = Column(JSON)
     timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+# ==================== NEW: TENDER WISHLIST MODEL ====================
+class WishlistStatusEnum(str, enum.Enum):
+    """Defines the status of a tender in wishlist/history."""
+    won = "won"
+    rejected = "rejected"
+    incomplete = "incomplete"
+    pending = "pending"
+
+
+class TenderWishlist(Base):
+    """
+    Stores saved tenders in user's wishlist/history.
+    Tracks tender progress through analysis workflow stages (STAGE 3 UI).
+    
+    Linked to:
+    - Tender: Original tender information via tender_ref_number
+    - User: User who saved the tender
+    - TenderAnalysis: Detailed analysis results (from analyze module)
+    """
+    __tablename__ = 'tender_wishlist'
+    
+    # Primary Keys
+    id = Column(String, primary_key=True, index=True)
+    tender_ref_number = Column(String, ForeignKey('tenders.tender_ref_number'), nullable=False, index=True)
+    user_id = Column(UUID(as_uuid=True), ForeignKey('users.id'), nullable=True, index=True)
+    
+    # Tender Information (denormalized for quick access)
+    title = Column(String(255), nullable=False)
+    authority = Column(String(255), nullable=False)
+    value = Column(Float, nullable=False)
+    emd = Column(Float, nullable=False)
+    due_date = Column(String(50), nullable=False)  # Format: "15 Dec"
+    category = Column(String(100), nullable=False)
+    
+    # Analysis Progress Tracking (Matches STAGE 3 - Wishlist workflow)
+    progress = Column(Integer, default=0, nullable=False)  # 0-100% completion
+    analysis_state = Column(Boolean, default=False)  # Analysis phase done
+    synopsis_state = Column(Boolean, default=False)  # Synopsis phase done
+    evaluated_state = Column(Boolean, default=False)  # Evaluation phase done
+    results = Column(String(50), default=WishlistStatusEnum.pending.value)  # won/rejected/incomplete/pending
+    
+    # Status Messages
+    status_message = Column(String(255), nullable=True)
+    error_message = Column(Text, nullable=True)
+    
+    # Timestamps
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
+    added_to_wishlist_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    
+    def to_dict(self):
+        """Convert SQLAlchemy model to dictionary for API responses."""
+        return {
+            'id': self.id,
+            'tender_ref_number': self.tender_ref_number,
+            'user_id': str(self.user_id) if self.user_id else None,
+            'title': self.title,
+            'authority': self.authority,
+            'value': float(self.value),
+            'emd': float(self.emd),
+            'due_date': self.due_date,
+            'category': self.category,
+            'progress': self.progress,
+            'analysis_state': self.analysis_state,
+            'synopsis_state': self.synopsis_state,
+            'evaluated_state': self.evaluated_state,
+            'results': self.results,
+            'status_message': self.status_message,
+            'error_message': self.error_message,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+            'added_to_wishlist_at': self.added_to_wishlist_at.isoformat() if self.added_to_wishlist_at else None,
+        }
