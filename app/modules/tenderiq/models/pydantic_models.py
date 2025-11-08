@@ -19,6 +19,7 @@ class TenderFile(BaseModel):
     is_cached: bool = False
     cache_status: Optional[str] = "pending"
     model_config = ConfigDict(from_attributes=True)
+    file_type: str
 
 class Tender(BaseModel):
     id: UUID
@@ -145,7 +146,7 @@ class StatusEnum(str, Enum):
     NOT_INTERESTED = "not_interested"
     PENDING_RESULTS = "pending_results"
 
-class HistoryItem(BaseModel):
+class ActionHistoryItem(BaseModel):
     """Logs specific user-driven actions on a tender for history tracking."""
     id: str
     tender_id: str
@@ -154,7 +155,36 @@ class HistoryItem(BaseModel):
     notes: str
     timestamp: datetime
 
+class RiskLevel(str, Enum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+
+class TenderHistoryType(str, Enum):
+    DUE_DATE_EXTENSION = "due_date_extension"
+    BID_DEADLINE_EXTENSION = "bid_deadline_extension"
+    CORRIGENDUM = "corrigendum"
+    AMENDMENT = "amendment"
+    OTHER = "other"
+
+class TenderHistoryDateChange(BaseModel):
+    from_date: str
+    to_date: str
+
+class TenderHistoryItem(BaseModel):
+  id: str
+  tender_id: str
+  tdr: str
+  type: TenderHistoryType
+  note: str
+  update_date: str
+  files_changed: Optional[List[TenderFile]]
+  date_change: Optional[TenderHistoryDateChange]
+}
+
+
 class FullTenderDetails(BaseModel):
+    risk_level: RiskLevel
     ## From ScrapedTender
     id: str
 
@@ -244,7 +274,8 @@ class FullTenderDetails(BaseModel):
     is_favorite: bool
     is_archived: bool
     is_wishlisted: bool
-    history: List[HistoryItem]
+    history: List[ActionHistoryItem]
+    tender_history: List[TenderHistoryItem]
 
 
 # ==================== Response Models - Analysis Metadata ====================
