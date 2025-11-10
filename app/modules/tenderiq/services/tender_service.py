@@ -99,7 +99,7 @@ def get_full_tender_details(db: Session, tender_id: UUID) -> Optional[FullTender
 
     # --- FIX 1: Convert emd and tender_value from complex strings to integers ---
     # APPLY THE RENAMED FUNCTION: parse_indian_currency
-    if 'emd' in scraped_dict:
+    if "emd" in scraped_dict:
         scraped_dict['emd'] = parse_indian_currency(scraped_dict['emd'])
     if 'tender_value' in scraped_dict:
         scraped_dict['tender_value'] = parse_indian_currency(scraped_dict['tender_value'])
@@ -156,6 +156,8 @@ def get_full_tender_details(db: Session, tender_id: UUID) -> Optional[FullTender
 
     # 2. Handle Boolean fields
     combined["is_favorite"] = combined.get("is_favorite") or False
+    combined["is_wishlisted"] = combined.get("is_wishlisted") or False
+    combined["is_archived"] = combined.get("is_archived") or False
 
     if "files" in combined and combined["files"]:
         for file_item in combined["files"]:
@@ -247,6 +249,13 @@ def get_full_tender_details(db: Session, tender_id: UUID) -> Optional[FullTender
     else:
         combined["tender_history"] = []
         combined["history"] = []
+
+    # HACK: Remove the 'history' item if the "action" is empty
+    for item in combined["history"]:
+        if item["action"] == None:
+            combined["history"].remove(item)
+
+    print(combined["history"])
 
     # Validate the modified dictionary
     return FullTenderDetails.model_validate(combined)
