@@ -212,7 +212,7 @@ def scrape_link(link: str, source_priority: str = "normal", skip_dedup_check: bo
                         try:
                             if tender_data.details:
                                 logger.debug(f"🔬 Starting analysis for: {tender_data.tender_name}")
-                                start_tender_processing(tender_data.details)
+                                # start_tender_processing(tender_data.details)
                                 logger.debug(f"✅ Analysis complete for: {tender_data.tender_name}")
                             else:
                                 logger.warning(f"⚠️  Skipping analysis for {tender_data.tender_name}: No details available.")

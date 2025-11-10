@@ -13,8 +13,8 @@ from app.modules.scraper.db.schema import ScrapedTender
 from app.modules.tenderiq.db.repository import TenderRepository
 from app.modules.tenderiq.models.pydantic_models import ReviewStatusEnum
 from app.modules.tenderiq.analyze.db.repository import AnalyzeRepository
-from app.modules.tenderiq.analyze.db.schema import AnalysisStatusEnum
-from app.modules.tenderiq.analyze.models.pydantic_models import OnePagerSchema
+from app.modules.analyze.db.schema import AnalysisStatusEnum
+from app.modules.analyze.models.pydantic_models import OnePagerSchema
 
 
 def start_tender_processing(tender: TenderDetailPage):
