@@ -10,3 +10,10 @@ data/
 tenders/
 dms/
 *.log
+.DS_Store
+venv/
+.env
+token.json
+*.sql
+__pycache__/
+*.pyc

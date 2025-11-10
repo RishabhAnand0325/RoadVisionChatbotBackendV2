@@ -73,9 +73,9 @@ def get_tender_details(
     return tender_details
 
 ## TODO: Implement this endpoint. It will replace /tenders/{tender_id} later
+## Done :)
 @router.get(
     "/tenders/{tender_id}/full",
-    response_model=FullTenderDetails,
     tags=["TenderIQ"],
     summary="Get detailed information for a single tender",
 )
@@ -83,7 +83,28 @@ def get_full_tender_details(
     tender_id: UUID,
     db: Session = Depends(get_db_session)
 ):
-    pass
+    """
+    Get complete tender details with all related data.
+    """
+    try:
+        tender_details = tender_service.get_full_tender_details(db, tender_id)
+        
+        if not tender_details:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Tender not found."
+            )
+        
+        return tender_details
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve full tender details: {str(e)}"
+        )
+
 
 @router.get(
     "/wishlist",

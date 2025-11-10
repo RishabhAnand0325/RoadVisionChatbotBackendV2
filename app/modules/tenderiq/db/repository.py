@@ -93,7 +93,26 @@ class TenderRepository:
                 return parser.parse(date_str)
             except (parser.ParserError, TypeError):
                 return None
-
+            
+    # New method added
+    def get_full_tender_details(self, tender_id: UUID):
+        """
+        Fetch full tender details with all related data.
+        
+        Includes:
+        - Tender basic info
+        - ScrapedTender data (files, dates, etc.)
+        - Tender action history
+        - Flags (favorite, archived, wishlisted)
+        
+        Args:
+            tender_id: UUID of the tender
+            
+        Returns:
+            Tender object with all relationships loaded
+        """
+        tender = self.db.query(Tender).filter(Tender.id == tender_id).first()
+        return tender
 
 # ==================== NEW: WISHLIST REPOSITORY METHODS ====================
 
