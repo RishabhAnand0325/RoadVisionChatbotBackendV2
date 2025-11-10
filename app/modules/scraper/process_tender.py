@@ -150,7 +150,8 @@ ANSWER:"""
             try:
                 response = llm_model.generate_content(prompt)
                 answer = response.text.strip()
-                print(f"  🗣️ LLM Response: {answer[:100].replace('\n', ' ')}...")
+                answer_stripped = answer[:100].replace('\n', ' ')
+                print(f"  🗣️ LLM Response: {answer_stripped}...")
                 return answer
             except Exception as e:
                 print(f"  ❌ LLM generation failed: {e}")
