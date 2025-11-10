@@ -174,12 +174,13 @@ class TenderHistoryDateChange(BaseModel):
 class TenderHistoryItem(BaseModel):
     id: str
     tender_id: str
+    user_id: Optional[str] = None  # Added to track which user performed the action
     tdr: str
     type: TenderHistoryType
     note: str
     update_date: str
-    files_changed: Optional[List[TenderFile]]
-    date_change: Optional[TenderHistoryDateChange]
+    files_changed: Optional[List[TenderFile]] = []
+    date_change: Optional[TenderHistoryDateChange] = None
 
 
 class FullTenderDetails(BaseModel):
@@ -213,8 +214,8 @@ class FullTenderDetails(BaseModel):
     # city is already there from Tender model
     state: str
     document_fees: str
-    emd: str
-    tender_value: str
+    emd: int
+    tender_value: int
     tender_type: str
     bidding_type: str
     competition_type: str
@@ -275,6 +276,7 @@ class FullTenderDetails(BaseModel):
     is_wishlisted: bool
     history: List[ActionHistoryItem]
     tender_history: List[TenderHistoryItem]
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ==================== Response Models - Analysis Metadata ====================
