@@ -38,7 +38,13 @@ def get_daily_tenders_sse(db: Session):
             pydantic_tenders = [Tender.model_validate(t).model_dump(mode='json') for t in tenders]
             yield {
                 'event': 'batch',
-                'data': json.dumps(pydantic_tenders)
+                'data': json.dumps({
+                    'query_id': str(category.id),
+                    'data': pydantic_tenders
+                })
             }
             start += batch
             sleep(0.5)
+    yield {
+        'event': 'complete',
+    }
