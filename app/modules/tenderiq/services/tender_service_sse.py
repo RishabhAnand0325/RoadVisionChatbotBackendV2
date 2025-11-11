@@ -5,6 +5,30 @@ from sse_starlette.sse import EventSourceResponse
 from app.modules.tenderiq.models.pydantic_models import DailyTendersResponse, Tender
 from app.modules.tenderiq.repositories import repository as tenderiq_repo
 
+def get_daily_tenders_limited(db: Session, start: int, end: int):
+    scrape_runs = tenderiq_repo.get_scrape_runs(db)
+    latest_scrape_run = scrape_runs[-1]
+    categories_of_current_day = tenderiq_repo.get_all_categories(db, latest_scrape_run)
+
+    to_return = DailyTendersResponse(
+        id = latest_scrape_run.id,
+        run_at = latest_scrape_run.run_at,
+        date_str = latest_scrape_run.date_str,
+        name = latest_scrape_run.name,
+        contact = latest_scrape_run.contact,
+        no_of_new_tenders = latest_scrape_run.no_of_new_tenders,
+        company = latest_scrape_run.company,
+        queries = []
+    )
+
+    for category in categories_of_current_day:
+        tenders = tenderiq_repo.get_tenders_from_category(db, category, start, end)
+        pydantic_tenders = [Tender.model_validate(t).model_dump(mode='json') for t in tenders]
+        category.tenders = pydantic_tenders
+        to_return.queries.append(category)
+
+    return to_return
+
 def get_daily_tenders_sse(db: Session, start: int, end: int):
     scrape_runs = tenderiq_repo.get_scrape_runs(db)
     latest_scrape_run = scrape_runs[-1]
@@ -27,7 +51,7 @@ def get_daily_tenders_sse(db: Session, start: int, end: int):
     }
 
     for category in categories_of_current_day:
-        batch = 100
+        batch = 200
         while True:
             tenders = tenderiq_repo.get_tenders_from_category(db, category, start, batch)
             if len(tenders) == 0:
