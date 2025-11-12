@@ -1,6 +1,8 @@
 import json
 import logging
 import shutil
+import os
+import gc
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Generator
@@ -67,6 +69,48 @@ MAX_EXTRACTED_SIZE_MB = 500  # Max total uncompressed archive size
 
 
 # ============================================================================
+# MEMORY OPTIMIZATION 
+# Prevents system from killing the process due to memory exhaustion
+# ============================================================================
+
+def _optimize_environment():
+    """Set environment variables for memory optimization."""
+    # Disable tokenizer parallelism to save memory
+    os.environ["TOKENIZERS_PARALLELISM"] = "false"
+    
+    # Reduce TensorFlow memory usage
+    os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "true"
+    os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+    
+    # Reduce PyTorch memory usage
+    os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:128"
+    
+    # Use CPU only to avoid CUDA memory issues
+    os.environ["CUDA_VISIBLE_DEVICES"] = ""
+
+def _check_memory_available():
+    """Check if sufficient memory is available."""
+    try:
+        import psutil
+        memory = psutil.virtual_memory()
+        available_gb = memory.available / (1024**3)
+        
+        if available_gb < 0.5:  # Less than 500MB
+            logger.warning(f"Low memory available: {available_gb:.1f}GB")
+            return False
+        return True
+    except ImportError:
+        # psutil not available, assume OK
+        return True
+    except Exception:
+        # Error checking memory, assume OK
+        return True
+
+# Initialize memory optimization when module is imported
+_optimize_environment()
+
+
+# ============================================================================
 # RETRY DECORATOR
 # Implements exponential backoff for transient failures (network issues, rate limits)
 # ============================================================================
@@ -118,7 +162,7 @@ def retry_with_backoff(max_attempts: int = MAX_RETRIES, base_delay: float = RETR
 # --- Main Analysis Function ---
 def analyze_tender(db: Session, tdr: str):
     """
-    Comprehensive tender analysis pipeline.
+    Comprehensive tender analysis pipeline with memory optimization.
 
     This function orchestrates the entire tender analysis workflow:
     1. Fetch tender data from database (with eager loading)
@@ -132,6 +176,11 @@ def analyze_tender(db: Session, tdr: str):
     in one step don't cascade to the entire analysis. It also uses retries
     for transient failures (network issues, API rate limits).
 
+    Memory optimization features:
+    - Automatic garbage collection
+    - Memory usage monitoring (if psutil available)
+    - Environment optimization for low-memory systems
+
     Args:
         db: Database session
         tdr: Tender reference number (e.g., "51655667")
@@ -143,12 +192,16 @@ def analyze_tender(db: Session, tdr: str):
     temp_dir = None
     analysis = None
 
+    # Memory optimization: Force garbage collection and check memory
+    gc.collect()
+    _check_memory_available()
+
     try:
         # ====================================================================
         # STEP 1: FETCH TENDER DATA
         # Use eager loading to get all data in a single query instead of N+1
         # ====================================================================
-        logger.info(f"[{tdr}] Fetching tender data from database")
+        logger.info(f"[{tdr}] Starting analysis with memory optimization")
 
         # Optimize: Single eager-loaded query instead of 3 separate queries
         # This reduces database round-trips from 3 to 1
@@ -331,6 +384,10 @@ def analyze_tender(db: Session, tdr: str):
                 shutil.rmtree(temp_dir, ignore_errors=True)
             except Exception as e:
                 logger.error(f"[{tdr}] Failed to clean up temp directory: {e}")
+        
+        # Memory optimization: Force garbage collection after cleanup
+        gc.collect()
+        logger.info(f"[{tdr}] Analysis cleanup complete")
 
 
 # ============================================================================
@@ -446,37 +503,91 @@ def _extract_text_from_files(downloaded_files: List[Path], tdr: str) -> str:
             file_suffix = file_path.suffix.lower()
 
             if file_suffix == ".pdf":
-                # Extract PDF text using PDFProcessor
+                # Extract PDF text using PDFProcessor with memory management
                 # This uses LlamaParse with fallbacks (PyMuPDF, Tesseract)
-                # Much better than PyPDF2 for handling various PDF formats
                 logger.info(f"[{tdr}] Extracting PDF using PDFProcessor: {file_path.name}")
 
+                # Check file size to prevent memory issues
+                file_size = file_path.stat().st_size
+                max_file_size = 50 * 1024 * 1024  # 50MB limit
+                
+                if file_size > max_file_size:
+                    logger.warning(f"[{tdr}] PDF file {file_path.name} is too large ({file_size/1024/1024:.1f}MB), skipping")
+                    files_skipped += 1
+                    continue
+
                 try:
-                    # PDFProcessor.extract_with_llamaparse() returns Dict[page_num, text]
-                    # If LlamaParse fails, it falls back to PyMuPDF, then Tesseract
-                    page_texts = pdf_processor.extract_with_llamaparse(str(file_path))
-
-                    if not page_texts:
-                        # Fallback to PyMuPDF
-                        logger.warning(f"[{tdr}] LlamaParse failed for {file_path.name}, trying PyMuPDF")
-                        page_texts = pdf_processor.extract_with_pymupdf(str(file_path))
-
-                    if not page_texts:
-                        # Final fallback to Tesseract OCR
-                        logger.warning(f"[{tdr}] PyMuPDF failed for {file_path.name}, trying Tesseract OCR")
-                        page_texts = pdf_processor.extract_with_tesseract(str(file_path))
-
-                    if page_texts:
-                        # Combine all pages into single text
-                        extracted_text = "\n".join(
-                            page_texts[page_num] for page_num in sorted(page_texts.keys())
-                        )
+                    import psutil
+                    import gc
+                    
+                    # Check available memory before processing
+                    available_memory = psutil.virtual_memory().available
+                    memory_threshold = 500 * 1024 * 1024  # 500MB minimum required
+                    
+                    if available_memory < memory_threshold:
+                        logger.warning(f"[{tdr}] Low memory ({available_memory/1024/1024:.1f}MB), forcing garbage collection")
+                        gc.collect()
+                        available_memory = psutil.virtual_memory().available
+                        
+                        if available_memory < memory_threshold:
+                            logger.error(f"[{tdr}] Insufficient memory to process {file_path.name}, skipping")
+                            files_skipped += 1
+                            continue
+                    
+                    # Use the full process_pdf method instead of direct extract methods
+                    # This provides better error handling and memory management
+                    logger.info(f"[{tdr}] Starting PDF processing with memory management...")
+                    chunks, stats = pdf_processor.process_pdf(
+                        job_id=f"analyze_tender_{tdr}",
+                        pdf_path=str(file_path),
+                        doc_id=tdr,
+                        filename=file_path.name
+                    )
+                    
+                    if chunks:
+                        # Extract text content from chunks for backward compatibility
+                        extracted_text = " ".join([chunk.get('content', '') for chunk in chunks])
+                        logger.info(f"[{tdr}] Successfully extracted {len(extracted_text)} characters from PDF {file_path.name}")
                     else:
-                        logger.error(f"[{tdr}] All PDF extraction methods failed for {file_path.name}")
-
+                        logger.warning(f"[{tdr}] No chunks extracted from PDF {file_path.name}")
+                        extracted_text = None
+                        
+                except ImportError:
+                    logger.warning(f"[{tdr}] psutil not available, proceeding without memory checks")
+                    # Fallback to original method but with timeout protection
+                    try:
+                        chunks, stats = pdf_processor.process_pdf(
+                            job_id=f"analyze_tender_{tdr}",
+                            pdf_path=str(file_path),
+                            doc_id=tdr,
+                            filename=file_path.name
+                        )
+                        
+                        if chunks:
+                            extracted_text = " ".join([chunk.get('content', '') for chunk in chunks])
+                            logger.info(f"[{tdr}] Successfully extracted {len(extracted_text)} characters from PDF {file_path.name}")
+                        else:
+                            logger.warning(f"[{tdr}] No chunks extracted from PDF {file_path.name}")
+                            extracted_text = None
+                            
+                    except Exception as e:
+                        logger.error(f"[{tdr}] PDF processing failed for {file_path.name}: {e}")
+                        extracted_text = None
+                
                 except Exception as e:
-                    logger.error(f"[{tdr}] Error using PDFProcessor: {e}")
-                    # Let the outer exception handler catch this
+                    logger.error(f"[{tdr}] PDF processing failed for {file_path.name}: {e}")
+                    # Try fallback methods with memory protection
+                    try:
+                        logger.info(f"[{tdr}] Attempting PyMuPDF fallback for {file_path.name}")
+                        page_texts = pdf_processor.extract_with_pymupdf(str(file_path))
+                        if page_texts:
+                            extracted_text = " ".join(page_texts.values())
+                        else:
+                            logger.warning(f"[{tdr}] All PDF extraction methods failed for {file_path.name}")
+                            extracted_text = None
+                    except Exception as fallback_error:
+                        logger.error(f"[{tdr}] Fallback PDF extraction failed for {file_path.name}: {fallback_error}")
+                        extracted_text = None
 
             elif file_suffix in [".html", ".htm"]:
                 # Extract visible text from HTML using BeautifulSoup

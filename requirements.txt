@@ -153,6 +153,7 @@ premailer
 propcache
 proto-plus
 protobuf
+psutil
 psycopg2
 psycopg2-binary
 pyasn1
