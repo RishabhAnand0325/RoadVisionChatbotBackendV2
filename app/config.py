@@ -18,6 +18,11 @@ class Settings:
     MAX_PDF_SIZE_MB: int = 50
     MAX_EXCEL_SIZE_MB: int = 10
 
+    # Archive Processing
+    MAX_ARCHIVE_RECURSION_DEPTH: int = 3  # Max nested archive extraction depth
+    MAX_FILES_PER_ARCHIVE: int = 100  # Max files in archive (prevents extraction bombs)
+    MAX_EXTRACTED_SIZE_MB: int = 500  # Max total uncompressed archive size
+
     # RAG
     RAG_TOP_K: int = 15  # Number of documents to retrieve per query
     RAG_MEMORY_SIZE: int = 10  # Number of recent messages to keep in memory (Phase 2+)

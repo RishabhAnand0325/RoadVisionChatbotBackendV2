@@ -934,36 +934,315 @@ class HTMLProcessor:
 
 
 # ============================================================================
+# ARCHIVE PROCESSOR
+# ============================================================================
+
+class ArchiveProcessor:
+    """
+    Process archive files (ZIP, RAR, TAR, GZIP, 7Z) by extracting and
+    recursively processing contained files.
+
+    Archives are extracted to a temporary directory and their contents are
+    processed by the appropriate file-type processor (PDF, Excel, HTML, etc.).
+
+    Supports:
+    - ZIP archives (.zip)
+    - RAR archives (.rar)
+    - TAR archives (.tar, .tar.gz, .tar.bz2)
+    - 7-Zip archives (.7z)
+    - Nested archives (recursively with depth limit)
+
+    Features:
+    - Automatic format detection
+    - Safety limits (max recursion depth, max files, max size)
+    - Graceful error handling (corrupted files don't stop processing)
+    - Metadata tracking (preserves archive path in chunk metadata)
+    """
+
+    job_id = None
+    _recursion_depth = 0
+    _max_recursion_depth = 3
+
+    def __init__(self, embedding_model, tokenizer, pdf_processor=None, excel_processor=None, html_processor=None, archive_processor=None):
+        """
+        Initialize the ArchiveProcessor.
+
+        Args:
+            embedding_model: Embedding model for chunking
+            tokenizer: Tokenizer for text processing
+            pdf_processor: PDFProcessor instance (created if not provided)
+            excel_processor: ExcelProcessor instance (created if not provided)
+            html_processor: HTMLProcessor instance (created if not provided)
+            archive_processor: ArchiveProcessor instance for recursive processing
+        """
+        self.embedding_model = embedding_model
+        self.tokenizer = tokenizer
+
+        # Import here to avoid circular imports
+        from app.modules.askai.services.archive_utils import (
+            extract_archive,
+            detect_archive_type,
+            is_archive,
+        )
+
+        self.extract_archive = extract_archive
+        self.detect_archive_type = detect_archive_type
+        self.is_archive = is_archive
+
+        # Initialize dependent processors (lazy initialization to avoid circular deps)
+        self.pdf_processor = pdf_processor
+        self.excel_processor = excel_processor
+        self.html_processor = html_processor
+        self.archive_processor = archive_processor
+
+        if not HAS_PDF_LIBS:
+            print("⚠️  PDF processing libraries not available for archive contents")
+
+    def _get_processors(self):
+        """
+        Lazy initialization of dependent processors.
+        This avoids circular imports when ArchiveProcessor is initialized.
+        """
+        if not self.pdf_processor:
+            self.pdf_processor = PDFProcessor(self.embedding_model, self.tokenizer)
+        if not self.excel_processor:
+            self.excel_processor = ExcelProcessor(self.embedding_model, self.tokenizer)
+        if not self.html_processor:
+            self.html_processor = HTMLProcessor(self.embedding_model, self.tokenizer)
+        if not self.archive_processor:
+            # Recursive archive processing
+            self.archive_processor = ArchiveProcessor(
+                self.embedding_model,
+                self.tokenizer,
+                self.pdf_processor,
+                self.excel_processor,
+                self.html_processor,
+            )
+
+    def update_progress(self, stage: ProcessingStage, progress: float) -> None:
+        print(f"📦 Progress: {stage} {progress:.1f}%")
+        if not self.job_id:
+            return
+        if self.job_id in upload_jobs:
+            upload_jobs[self.job_id].stage = stage
+            upload_jobs[self.job_id].progress = progress
+
+    def _clean_metadata(self, metadata: Dict) -> Dict:
+        """Clean metadata for ChromaDB compatibility"""
+        cleaned = {}
+        for k, v in metadata.items():
+            str_val = str(v)
+            str_val = re.sub(r'[^\w\s\-\.\,\/]', '_', str_val)
+            str_val = str_val.strip()
+            cleaned[k] = str_val if str_val else "unknown"
+        return cleaned
+
+    def process_archive(self, job_id: str, archive_path: str, doc_id: str, filename: str) -> Tuple[List[Dict], Dict]:
+        """
+        Process an archive file by extracting and processing its contents.
+
+        The archive is extracted to a temporary directory, and contained files
+        are processed recursively based on their type. Supported formats:
+        - PDFs → PDFProcessor
+        - Excel files → ExcelProcessor
+        - HTML files → HTMLProcessor
+        - Archives → Recursive ArchiveProcessor (with depth limit)
+
+        Metadata tracks the original archive filename and the path of each
+        file within the archive structure.
+
+        Args:
+            job_id: Unique job identifier for progress tracking
+            archive_path: Path to the archive file
+            doc_id: Document ID for metadata
+            filename: Original archive filename
+
+        Returns:
+            Tuple of (chunks, stats) where chunks are aggregated from all files
+
+        Raises:
+            Exception: If archive extraction fails or no files can be processed
+        """
+        self.job_id = job_id
+        self._recursion_depth += 1
+
+        print(f"\n{'='*60}\n📦 Processing Archive: {filename}\n{'='*60}")
+        print(f"Recursion depth: {self._recursion_depth}/{self._max_recursion_depth}")
+
+        start_time = time.time()
+
+        # Safety check: prevent infinite recursion with nested archives
+        if self._recursion_depth > self._max_recursion_depth:
+            logger.warning(f"Archive recursion depth exceeded ({self._max_recursion_depth})")
+            return [], {"error": "Max recursion depth exceeded", "processing_time": 0}
+
+        try:
+            # Create temporary directory for extraction
+            archive_name = Path(filename).stem
+            temp_extract_dir = Path(f"/tmp/archive_extract_{archive_name}_{uuid4()}")
+            temp_extract_dir.mkdir(parents=True, exist_ok=True)
+
+            self.update_progress(ProcessingStage.EXTRACTING_CONTENT, 0)
+
+            # Extract archive
+            logger.info(f"Extracting archive: {filename}")
+            extracted_files = self.extract_archive(
+                archive_path,
+                str(temp_extract_dir),
+                max_files=100,
+                max_size_mb=500
+            )
+
+            if not extracted_files:
+                logger.error(f"No files extracted from archive: {filename}")
+                return [], {"error": "Archive extraction produced no files", "processing_time": 0}
+
+            logger.info(f"Extracted {len(extracted_files)} files from archive")
+
+            # Process extracted files
+            all_chunks = []
+            processed_count = 0
+            failed_count = 0
+
+            for file_idx, file_path in enumerate(extracted_files):
+                progress = (file_idx / len(extracted_files)) * 100
+                self.update_progress(ProcessingStage.EXTRACTING_CONTENT, progress)
+
+                try:
+                    file_ext = file_path.suffix.lower()
+
+                    # Get file path relative to archive for metadata
+                    relative_path = file_path.relative_to(temp_extract_dir)
+
+                    logger.info(f"Processing extracted file: {relative_path}")
+
+                    self._get_processors()
+
+                    if file_ext == '.pdf':
+                        chunks, _ = self.pdf_processor.process_pdf(
+                            job_id, str(file_path), doc_id, file_path.name
+                        )
+                    elif file_ext in ['.xls', '.xlsx']:
+                        chunks, _ = self.excel_processor.process_excel(
+                            job_id, str(file_path), doc_id, file_path.name
+                        )
+                    elif file_ext == '.html':
+                        chunks, _ = self.html_processor.process_html(
+                            job_id, str(file_path), doc_id, file_path.name
+                        )
+                    elif self.is_archive(file_path):
+                        # Recursively process nested archives
+                        chunks, _ = self.archive_processor.process_archive(
+                            job_id, str(file_path), doc_id, file_path.name
+                        )
+                    else:
+                        logger.warning(f"Skipped unsupported file type: {file_path.name}")
+                        failed_count += 1
+                        continue
+
+                    # Add archive metadata to chunks
+                    for chunk in chunks:
+                        chunk['metadata']['archive_filename'] = filename
+                        chunk['metadata']['archive_path'] = str(relative_path)
+                        chunk['metadata']['extraction_depth'] = self._recursion_depth
+
+                    all_chunks.extend(chunks)
+                    processed_count += 1
+
+                except Exception as e:
+                    logger.error(f"Failed to process {file_path.name} from archive: {e}")
+                    failed_count += 1
+                    # Continue with next file - don't fail entire archive
+
+            # Cleanup extracted files
+            try:
+                shutil.rmtree(temp_extract_dir, ignore_errors=True)
+            except Exception as e:
+                logger.warning(f"Failed to clean up temp directory: {e}")
+
+            stats = {
+                "total_chunks": len(all_chunks),
+                "files_processed": processed_count,
+                "files_failed": failed_count,
+                "archive_filename": filename,
+                "recursion_depth": self._recursion_depth,
+                "processing_time": time.time() - start_time
+            }
+
+            print(f"✅ Processed {processed_count}/{len(extracted_files)} files from archive")
+            print(f"⏱️  Processing time: {stats['processing_time']:.2f}s\n")
+
+            self._recursion_depth -= 1
+            return all_chunks, stats
+
+        except Exception as e:
+            logger.error(f"Failed to process archive {filename}: {e}")
+            traceback.print_exc()
+            self._recursion_depth -= 1
+            raise
+
+
+# ============================================================================
 # UNIFIED DOCUMENT SERVICE
 # ============================================================================
 
 class DocumentService:
-    """Unified service to handle PDF, Excel, and HTML document processing"""
-    
+    """
+    Unified service to handle PDF, Excel, HTML, and Archive document processing.
+
+    Routes files to appropriate processors based on file type:
+    - .pdf → PDFProcessor
+    - .xls, .xlsx → ExcelProcessor
+    - .html → HTMLProcessor
+    - .zip, .rar, .tar, .gz, .7z → ArchiveProcessor
+    """
+
     def __init__(self, embedding_model=None, tokenizer=None):
         """Initialize all processors"""
         self.pdf_processor = PDFProcessor(embedding_model, tokenizer)
         self.excel_processor = ExcelProcessor(embedding_model, tokenizer)
         self.html_processor = HTMLProcessor(embedding_model, tokenizer)
+        # Archive processor references other processors (initialized later to avoid circular deps)
+        self.archive_processor = ArchiveProcessor(
+            embedding_model,
+            tokenizer,
+            self.pdf_processor,
+            self.excel_processor,
+            self.html_processor,
+        )
     
     def process_document(self, job_id: str, file_path: str, doc_id: str, filename: str, save_json: bool = True) -> Tuple[List[Dict], Dict]:
         """
-        Process any document type and return chunks with stats
-        
+        Process any document type and return chunks with stats.
+
+        Supports multiple file types with automatic routing:
+        - PDF (.pdf) → PDFProcessor (with LlamaParse OCR)
+        - Excel (.xls, .xlsx) → ExcelProcessor (multi-sheet support)
+        - HTML (.html, .htm) → HTMLProcessor (structure preservation)
+        - Archives (.zip, .rar, .tar, .tar.gz, .7z) → ArchiveProcessor (recursive extraction)
+
+        Archives are transparently extracted and their contents are processed
+        as if they were individual files. Metadata preserves information about
+        the archive and file location within the archive.
+
         Args:
             job_id: Unique job identifier for progress tracking
             file_path: Path to the file to process
             doc_id: Document ID for metadata
             filename: Original filename
             save_json: Whether to save chunks as JSON
-        
+
         Returns:
             Tuple of (chunks, stats)
+
+        Raises:
+            ValueError: If file type is not supported
         """
         file_ext = Path(filename).suffix.lower()
-        
+        name_lower = filename.lower()
+
         print(f"\n🔄 Routing to appropriate processor based on file type: {file_ext}")
-        
+
         try:
             if file_ext == '.pdf':
                 chunks, stats = self.pdf_processor.process_pdf(job_id, file_path, doc_id, filename)
@@ -971,18 +1250,28 @@ class DocumentService:
                 chunks, stats = self.excel_processor.process_excel(job_id, file_path, doc_id, filename)
             elif file_ext == '.html':
                 chunks, stats = self.html_processor.process_html(job_id, file_path, doc_id, filename)
+            elif (
+                file_ext in ['.zip', '.rar', '.7z', '.gz', '.bz2']
+                or name_lower.endswith('.tar.gz')
+                or name_lower.endswith('.tar.bz2')
+                or file_ext == '.tar'
+                or name_lower.endswith('.tgz')
+            ):
+                # Archive formats: ZIP, RAR, 7Z, TAR variants, GZIP, BZIP2
+                chunks, stats = self.archive_processor.process_archive(job_id, file_path, doc_id, filename)
             else:
-                raise ValueError(f"Unsupported file type: {file_ext}. Supported: .pdf, .xls, .xlsx, .html")
-            
+                supported = ".pdf, .xls, .xlsx, .html, .zip, .rar, .tar, .tar.gz, .tar.bz2, .tgz, .7z"
+                raise ValueError(f"Unsupported file type: {file_ext}. Supported: {supported}")
+
             # Optionally save chunks to JSON
             if save_json:
                 json_filename = f"{Path(filename).stem}_chunks_output.json"
                 with open(json_filename, "w", encoding="utf-8") as f:
                     json.dump(chunks, f, indent=2, ensure_ascii=False)
                 print(f"💾 Saved chunks to: {json_filename}")
-            
+
             return chunks, stats
-            
+
         except Exception as e:
             print(f"❌ Document processing failed: {e}")
             traceback.print_exc()

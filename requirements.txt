@@ -237,3 +237,5 @@ zstandard
 redis
 hiredis
 celery
+rarfile
+py7zr
