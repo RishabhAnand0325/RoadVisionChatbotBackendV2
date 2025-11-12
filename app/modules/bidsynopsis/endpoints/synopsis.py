@@ -13,7 +13,6 @@ router = APIRouter()
 @router.get(
     "/synopsis/{tender_id}",
     response_model=BidSynopsisResponse,
-    tags=["BidSynopsis"],
     summary="Get bid synopsis for a tender",
     description="Retrieves structured bid synopsis containing basic information and eligibility requirements for a specific tender.",
     responses={
