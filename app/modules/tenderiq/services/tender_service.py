@@ -85,13 +85,16 @@ def get_full_tender_details(db: Session, tender_id: UUID) -> Optional[FullTender
         ScrapedTender.id == tender_id
     ).first()
 
+    if scraped_tender is None:
+        return None
+
     tender = db.query(Tender).options(
         joinedload(Tender.history)
     ).filter(
-        Tender.id == tender_id
+        Tender.tender_ref_number == scraped_tender.tdr
     ).first()
 
-    if not scraped_tender or not tender:
+    if tender is None:
         return None
 
     scraped_dict = orm_to_dict(scraped_tender)
