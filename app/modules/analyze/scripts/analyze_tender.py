@@ -13,6 +13,7 @@ import requests
 from sqlalchemy.orm import Session, joinedload
 from bs4 import BeautifulSoup
 
+from app.modules.askai.services.document_service import PDFProcessor 
 from app.modules.scraper.db.schema import ScrapedTender, ScrapedTenderFile
 from app.modules.tenderiq.db.schema import Tender
 from app.modules.analyze.db.schema import TenderAnalysis, AnalysisStatusEnum
@@ -114,6 +115,7 @@ def retry_with_backoff(max_attempts: int = MAX_RETRIES, base_delay: float = RETR
     return decorator
 
 
+# --- Main Analysis Function ---
 def analyze_tender(db: Session, tdr: str):
     """
     Comprehensive tender analysis pipeline.
@@ -173,6 +175,7 @@ def analyze_tender(db: Session, tdr: str):
         ).first()
 
         if not analysis:
+            print(f"🆕 Creating new analysis record...")
             analysis = TenderAnalysis(
                 id=uuid4(),
                 tender_id=tdr,
@@ -180,6 +183,8 @@ def analyze_tender(db: Session, tdr: str):
             )
             db.add(analysis)
             db.commit()
+        else:
+            print(f"✅ Found existing analysis record with status: {analysis.status}")
 
         # Mark analysis as started
         analysis.status = AnalysisStatusEnum.parsing
@@ -191,6 +196,8 @@ def analyze_tender(db: Session, tdr: str):
         # STEP 2: VALIDATE FILES & DOWNLOAD
         # ====================================================================
         files = scraped_tender.files  # Already loaded via eager loading above
+
+        print(f"📋 Found {len(files) if files else 0} files")
 
         if not files:
             logger.warning(f"[{tdr}] No files found for tender")
