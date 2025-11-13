@@ -129,11 +129,6 @@ class HistoryAndWishlistResponse(BaseModel):
     tenders: List[HistoryData]
 
 # ==================== Response Models - Full Tender Details ====================
-class AnalysisStatusEnum(str, Enum):
-    PENDING = "pending"
-    FAILED = "failed"
-    SKIPPED = "skipped"
-    COMPLETED = "completed"
 
 class StatusEnum(str, Enum):
     NEW = "new"
@@ -198,7 +193,7 @@ class FullTenderDetails(BaseModel):
     value: str
     due_date: str
 
-    analysis_status: AnalysisStatusEnum
+    analysis_status: str  # Use string instead of enum to avoid import issues
     error_message: str
 
     query_id: str
