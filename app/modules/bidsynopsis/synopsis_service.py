@@ -2,10 +2,10 @@ from typing import Optional, Union
 from uuid import UUID
 from decimal import Decimal
 from datetime import datetime
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 import re
 
-from app.modules.tenderiq.db.schema import Tender
+from app.modules.tenderiq.db.schema import Tender, ScrapedTender
 from .pydantic_models import (
     BasicInfoItem,
     RequirementItem,
@@ -21,32 +21,28 @@ def parse_indian_currency(value: Union[str, int, float, None]) -> float:
     if value is None:
         return 0.0
 
+    if isinstance(value, str):
+        # Handle "Crore" conversion
+        if "crore" in value.lower():
+            match = re.search(r'[\d,.]+', value.lower().replace('crore', ''))
+            if match:
+                cleaned_value = match.group(0).replace(',', '')
+                try:
+                    return float(cleaned_value)
+                except ValueError:
+                    pass
+
+        # General cleaning: Extract numeric part
+        cleaned_value = re.sub(r'[^\d.]', '', value).replace(',', '')
+        try:
+            return float(cleaned_value)
+        except ValueError:
+            return 0.0
+
     if isinstance(value, (int, float)):
         return float(value)
 
-    if not isinstance(value, str):
-        return 0.0
-
-    # Handle "Crore" conversion (1 Crore = 10,000,000)
-    if "crore" in value.lower():
-        match = re.search(r'[\d,.]+', value.lower().replace('crore', ''))
-        if match:
-            cleaned_value = match.group(0).replace(',', '')
-            try:
-                return float(cleaned_value)
-            except ValueError:
-                pass
-
-    # General cleaning: Extract numeric part
-    cleaned_value = re.sub(r'[^\d.]', '', value).replace(',', '')
-    try:
-        numeric_value = float(cleaned_value)
-        # If the value is very large, assume it's in the base currency (Rs) and convert to Crores
-        if numeric_value > 100000000:  # More than 1 Crore
-            return numeric_value / 10000000
-        return numeric_value
-    except ValueError:
-        return 0.0
+    return 0.0
 
 
 def get_estimated_cost_in_crores(tender: Tender) -> float:
@@ -85,90 +81,170 @@ def get_bid_security_in_crores(tender: Tender) -> float:
     return value
 
 
-def generate_basic_info(tender: Tender) -> list[BasicInfoItem]:
+def extract_document_cost(scraped_tender: Optional[ScrapedTender]) -> str:
+    """
+    Extracts document cost from scraped tender data.
+    Returns formatted string or "N/A" if not available.
+    """
+    if not scraped_tender:
+        return "N/A"
+
+    # Try document_fees field first
+    if scraped_tender.document_fees:
+        cost_str = scraped_tender.document_fees.strip()
+        if cost_str and cost_str.lower() != "n/a" and cost_str != "":
+            return f"Rs. {cost_str}" if not cost_str.lower().startswith('rs') else cost_str
+
+    return "N/A"
+
+
+def extract_completion_period(scraped_tender: Optional[ScrapedTender]) -> str:
+    """
+    Extracts completion period from scraped tender data.
+    Returns formatted string or "N/A" if not available.
+    """
+    if not scraped_tender:
+        return "N/A"
+
+    # Try tender_details field (parse for duration/period info)
+    if scraped_tender.tender_details:
+        details = scraped_tender.tender_details.lower()
+        # Look for patterns like "X months", "X years", "X days"
+        month_match = re.search(r'(\d+(?:\.\d+)?)\s*(?:months?|month|m\.?)', details)
+        if month_match:
+            return f"{month_match.group(1)} Months"
+
+        year_match = re.search(r'(\d+(?:\.\d+)?)\s*(?:years?|year|y\.?)', details)
+        if year_match:
+            years = float(year_match.group(1))
+            months = int(years * 12)
+            return f"{months} Months"
+
+    return "N/A"
+
+
+def extract_pre_bid_meeting_details(scraped_tender: Optional[ScrapedTender], 
+                                     tender: Tender) -> str:
+    """
+    Extracts pre-bid meeting details from scraped tender or uses tender data.
+    """
+    if tender.prebid_meeting_date:
+        return tender.prebid_meeting_date.strftime("%d/%m/%Y at %H%M Hours IST")
+
+    if scraped_tender and scraped_tender.tender_details:
+        # Look for pre-bid meeting patterns
+        details = scraped_tender.tender_details.lower()
+        prebid_match = re.search(
+            r'pre[\s-]?bid\s+meeting.*?(\d{1,2})[/-](\d{1,2})[/-](\d{4}).*?(\d{1,2}):(\d{2})',
+            details,
+            re.IGNORECASE
+        )
+        if prebid_match:
+            day, month, year, hour, minute = prebid_match.groups()
+            try:
+                date_obj = datetime(int(year), int(month), int(day), int(hour), int(minute))
+                return date_obj.strftime("%d/%m/%Y at %H%M Hours IST")
+            except ValueError:
+                pass
+
+    return "N/A"
+
+
+def format_bid_due_date(tender: Tender, scraped_tender: Optional[ScrapedTender]) -> str:
+    """
+    Formats bid due date from tender or scraped data.
+    """
+    if tender.submission_deadline:
+        return tender.submission_deadline.strftime("%d.%m.%Y, %H:%M %p")
+
+    if scraped_tender and scraped_tender.due_date:
+        return scraped_tender.due_date
+
+    return "N/A"
+
+
+def generate_basic_info(tender: Tender, scraped_tender: Optional[ScrapedTender]) -> list[BasicInfoItem]:
     """
     Generates the basicInfo array with 10 key fields.
-    Uses tender data with fallback defaults.
+    Dynamically fetches data from both tender and scraped_tender tables.
     """
-    # Calculate costs in Crores
     tender_value_crores = get_estimated_cost_in_crores(tender)
     emd_crores = get_bid_security_in_crores(tender)
+
+    # Extract dynamic data from scraped tender
+    document_cost = extract_document_cost(scraped_tender)
+    completion_period = extract_completion_period(scraped_tender)
+    pre_bid_meeting = extract_pre_bid_meeting_details(scraped_tender, tender)
+    bid_due_date = format_bid_due_date(tender, scraped_tender)
 
     basic_info = [
         BasicInfoItem(
             sno=1,
             item="Employer",
-            description=tender.employer_name or "National Highways Authority of India (NHAI)"
+            description=tender.employer_name or scraped_tender.tendering_authority if scraped_tender else "N/A"
         ),
         BasicInfoItem(
             sno=2,
             item="Name of Work",
-            description=tender.tender_title or "Construction of 4-Lane Highway from Jaipur to Ajmer (NH-8)"
+            description=tender.tender_title or (scraped_tender.tender_name if scraped_tender else "N/A")
         ),
         BasicInfoItem(
             sno=3,
             item="Tender Value",
-            description=f"Rs. {tender_value_crores:.2f} Crores (Excluding GST)"
+            description=f"Rs. {tender_value_crores:.2f} Crores (Excluding GST)" if tender_value_crores > 0 else "N/A"
         ),
         BasicInfoItem(
             sno=4,
             item="Project Length",
-            description=f"{tender.length_km or 120} km"
+            description=f"{tender.length_km} km" if tender.length_km else "N/A"
         ),
         BasicInfoItem(
             sno=5,
             item="EMD",
-            description=f"Rs. {emd_crores:.2f} Crores in form of Bank Guarantee"
+            description=f"Rs. {emd_crores:.2f} Crores in form of Bank Guarantee" if emd_crores > 0 else "N/A"
         ),
         BasicInfoItem(
             sno=6,
             item="Cost of Tender Documents",
-            description="Rs. 6,49,000/- (To be paid online)"
+            description=document_cost
         ),
         BasicInfoItem(
             sno=7,
             item="Period of Completion",
-            description="48 Months"
+            description=completion_period
         ),
         BasicInfoItem(
             sno=8,
             item="Pre-Bid Meeting",
-            description=(
-                tender.prebid_meeting_date.strftime("%d/%m/%Y at %H%M Hours IST")
-                if tender.prebid_meeting_date
-                else "07/07/2025 at 1530 Hours IST"
-            )
+            description=pre_bid_meeting
         ),
         BasicInfoItem(
             sno=9,
             item="Bid Due date",
-            description=(
-                tender.submission_deadline.strftime("%d.%m.%Y, %I.%M %p")
-                if tender.submission_deadline
-                else "28.07.2025, 3.00 PM"
-            )
+            description=bid_due_date
         ),
         BasicInfoItem(
             sno=10,
             item="Physical Submission",
-            description=(
-                tender.submission_deadline.strftime("%d.%m.%Y, %I.%M %p")
-                if tender.submission_deadline
-                else "28.07.2025, 3.00 PM"
-            )
+            description=bid_due_date  # Same as Bid Due date
         ),
     ]
 
     return basic_info
 
 
-def generate_all_requirements(tender: Tender) -> list[RequirementItem]:
+def generate_all_requirements(tender: Tender, scraped_tender: Optional[ScrapedTender]) -> list[RequirementItem]:
     """
     Generates the allRequirements array with eligibility criteria.
-    Uses tender data for calculations.
+    Uses tender data for calculations and scraped data for requirement details.
     """
     tender_value_crores = get_estimated_cost_in_crores(tender)
     tender_value = tender.estimated_cost or 0
+
+    # Try to extract requirement details from scraped_tender if available
+    requirement_text = "N/A"
+    if scraped_tender and scraped_tender.tender_details:
+        requirement_text = scraped_tender.tender_details[:500]  # First 500 chars
 
     requirements = [
         RequirementItem(
@@ -189,7 +265,7 @@ def generate_all_requirements(tender: Tender) -> list[RequirementItem]:
         RequirementItem(
             description="Clause 2.2.2 A",
             requirement="updated in accordance with clause 2.2.2.(I) and/ or (ii) paid for development of Eligible Project(s) in Category 1 and/or Category 2 specified in Clause 3.4.1; updated in accordance with clause 2.2.2.(I) and/ or",
-            ceigallValue=f"Rs. {(tender_value_crores * 2.4):.2f} Crores"
+            ceigallValue=f"Rs. {(tender_value_crores * 2.4):.2f} Crores" if tender_value_crores > 0 else "N/A"
         ),
         RequirementItem(
             description="(iii)",
@@ -203,12 +279,12 @@ def generate_all_requirements(tender: Tender) -> list[RequirementItem]:
         ),
         RequirementItem(
             description="",
-            requirement=f"Capital cost of eligible projects should be more than Rs. {(tender_value / 1000000):.2f} Crores.",
+            requirement=f"Capital cost of eligible projects should be more than Rs. {(tender_value / 1000000):.2f} Crores." if tender_value > 0 else "Capital cost of eligible projects should be as per tender requirements.",
             ceigallValue=""
         ),
         RequirementItem(
             description="Similar Work (JV Required)",
-            requirement=f"Rs. {(tender_value_crores * 0.25):.2f} Crores",
+            requirement=f"Rs. {(tender_value_crores * 0.25):.2f} Crores" if tender_value_crores > 0 else "N/A",
             ceigallValue=""
         ),
         RequirementItem(
@@ -261,13 +337,19 @@ def generate_all_requirements(tender: Tender) -> list[RequirementItem]:
     return requirements
 
 
-def generate_bid_synopsis(tender: Tender) -> BidSynopsisResponse:
+def generate_bid_synopsis(tender: Tender, scraped_tender: Optional[ScrapedTender] = None) -> BidSynopsisResponse:
     """
-    Main function to generate complete bid synopsis from tender data.
-    Combines basicInfo and allRequirements arrays.
+    Main function to generate complete bid synopsis from tender and scraped tender data.
+    
+    Args:
+        tender: The Tender ORM object
+        scraped_tender: Optional ScrapedTender ORM object for additional data
+    
+    Returns:
+        BidSynopsisResponse with both basicInfo and allRequirements
     """
-    basic_info = generate_basic_info(tender)
-    all_requirements = generate_all_requirements(tender)
+    basic_info = generate_basic_info(tender, scraped_tender)
+    all_requirements = generate_all_requirements(tender, scraped_tender)
 
     return BidSynopsisResponse(
         basicInfo=basic_info,
