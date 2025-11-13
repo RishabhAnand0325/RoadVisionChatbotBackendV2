@@ -43,3 +43,10 @@ def get_scrape_runs(db: Session) -> List[ScrapeRun]:
         .options(noload(ScrapeRun.queries))
         .all()
     )
+
+def get_scrape_run_by_id(db: Session, scrape_run_id: str) -> ScrapeRun:
+    return (
+        db.query(ScrapeRun)
+        .filter(ScrapeRun.id == scrape_run_id)
+        .first()
+    )

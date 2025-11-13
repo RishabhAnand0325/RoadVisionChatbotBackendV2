@@ -278,6 +278,19 @@ class FullTenderDetails(BaseModel):
     tender_history: List[TenderHistoryItem]
     model_config = ConfigDict(from_attributes=True)
 
+# ==================== Response Models - Analysis Metadata ====================
+
+class ScrapedDate(BaseModel):
+    id: str
+    date: str
+    run_at: str
+    tender_count: int
+    is_latest: bool
+    model_config = ConfigDict(from_attributes=True)
+
+class ScrapedDatesResponse(BaseModel):
+    dates: list[ScrapedDate]
+    model_config = ConfigDict(from_attributes=True)
 
 # ==================== Response Models - Analysis Metadata ====================
 
