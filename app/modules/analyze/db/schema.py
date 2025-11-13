@@ -8,15 +8,13 @@ from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import relationship, Mapped, mapped_column
 
 from app.db.database import Base
-from app.modules.auth.db.schema import User
-from app.modules.askai.db.models import Chat
-from ..models.pydantic_models import OnePagerSchema, ScopeOfWorkSchema, DataSheetSchema
 
 
 class AnalysisStatusEnum(str, enum.Enum):
     """Defines the processing status of a tender analysis."""
     pending = "pending"
     parsing = "parsing"
+    processing = "processing"  # Used in analyze_tender.py
     analyzing = "analyzing"
     completed = "completed"
     failed = "failed"
@@ -32,8 +30,8 @@ class TenderAnalysis(Base):
     
     # One-to-one relationship to the ScrapedTender being analyzed. This refers to scraped_tenders.tender_id_str.
     tender_id: Mapped[str] = mapped_column(String, nullable=False, unique=True, index=True)
-    user_id: Mapped[Optional[uuid.UUID]] = mapped_column(ForeignKey(User.id), nullable=True, index=True)
-    chat_id: Mapped[Optional[uuid.UUID]] = mapped_column(ForeignKey(Chat.id))
+    user_id: Mapped[Optional[uuid.UUID]] = mapped_column(ForeignKey('users.id'), nullable=True, index=True)
+    chat_id: Mapped[Optional[uuid.UUID]] = mapped_column(ForeignKey('chats.id'), nullable=True)
     
     # Analysis metadata
     status: Mapped[AnalysisStatusEnum] = mapped_column(postgresql.ENUM(AnalysisStatusEnum, name='analysisstatusenum', create_type=False), default=AnalysisStatusEnum.pending, nullable=False, index=True)
@@ -47,14 +45,12 @@ class TenderAnalysis(Base):
     analysis_started_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
     analysis_completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
     
-    # Type-hinted Analysis Results
-    one_pager_json: Mapped[Optional[OnePagerSchema]] = mapped_column(JSON)
-    scope_of_work_json: Mapped[Optional[ScopeOfWorkSchema]] = mapped_column(JSON)
-    data_sheet_json: Mapped[Optional[DataSheetSchema]] = mapped_column(JSON)
+    # Analysis Results - JSON columns (untyped to avoid circular imports)
+    one_pager_json: Mapped[Optional[dict]] = mapped_column(JSON)
+    scope_of_work_json: Mapped[Optional[dict]] = mapped_column(JSON)
+    data_sheet_json: Mapped[Optional[dict]] = mapped_column(JSON)
 
     # Relationships
-    user: Mapped["User"] = relationship()
-    chat: Mapped[Optional["Chat"]] = relationship()
     rfp_sections: Mapped[List["AnalysisRFPSection"]] = relationship(back_populates="analysis", cascade="all, delete-orphan")
     document_templates: Mapped[List["AnalysisDocumentTemplate"]] = relationship(back_populates="analysis", cascade="all, delete-orphan")
 
@@ -88,7 +84,7 @@ class AnalysisRFPSection(Base):
     id: Mapped[uuid.UUID] = mapped_column(postgresql.UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     analysis_id: Mapped[uuid.UUID] = mapped_column(ForeignKey('tender_analysis.id'), index=True)
     
-    section_number: Mapped[Optional[str]] = mapped_column(String(50))
+    section_number: Mapped[Optional[str]] = mapped_column(String(200))  # Increased from 50 to 200
     section_title: Mapped[str] = mapped_column(String(255))
     summary: Mapped[Optional[str]] = mapped_column(Text)
     key_requirements: Mapped[Optional[list]] = mapped_column(JSON)
@@ -109,7 +105,7 @@ class AnalysisDocumentTemplate(Base):
     
     template_name: Mapped[str] = mapped_column(String(255))
     description: Mapped[Optional[str]] = mapped_column(Text)
-    required_format: Mapped[Optional[str]] = mapped_column(String(50))
+    required_format: Mapped[Optional[str]] = mapped_column(String(100))  # Increased from 50 to 100
     content_preview: Mapped[Optional[str]] = mapped_column(Text)
     page_references: Mapped[Optional[list]] = mapped_column(JSON)
 
