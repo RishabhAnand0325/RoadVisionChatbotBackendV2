@@ -15,13 +15,14 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.modules.scraper.db.schema import ScrapedTender, ScrapedTenderFile
 from app.modules.tenderiq.db.schema import Tender
-from app.modules.analyze.db.schema import TenderAnalysis, AnalysisStatusEnum
+from app.modules.analyze.db.schema import TenderAnalysis, AnalysisStatusEnum, AnalysisRFPSection, AnalysisDocumentTemplate
 from app.modules.analyze.models.pydantic_models import (
     OnePagerSchema,
     ScopeOfWorkSchema,
     DataSheetSchema,
 )
 from app.core.services import llm_model, vector_store, pdf_processor
+from app.modules.askai.services.document_service import DocumentService
 
 logger = logging.getLogger(__name__)
 
@@ -277,42 +278,38 @@ def analyze_tender(db: Session, tdr: str):
         all_tender_chunks = []
         total_chunks_created = 0
 
-        # Process each downloaded file
+        # Process each downloaded file with comprehensive DocumentService
+        # Supports PDF, Excel, HTML, and archive files
+        document_service = DocumentService()
+        
         for file_path in downloaded_files:
             try:
                 file_suffix = file_path.suffix.lower()
+                logger.info(f"[{tdr}] Processing file with DocumentService: {file_path.name} (format: {file_suffix})")
 
-                # Only process PDF files through pdf_processor
-                # (Other formats would need their own processors)
-                if file_suffix == ".pdf":
-                    logger.info(f"[{tdr}] Processing PDF with pdf_processor: {file_path.name}")
+                # Use DocumentService which supports PDF, Excel, HTML, and archives
+                import uuid as uuid_module
+                doc_id = str(uuid_module.uuid4())
+                job_id = f"analyze_tender_{tdr}_{uuid_module.uuid4()}"
 
-                    # pdf_processor.process_pdf() handles:
-                    # - Text extraction (with LlamaParse OCR, PyMuPDF, Tesseract fallbacks)
-                    # - Chunking (with proper overlap)
-                    # - Metadata cleaning and standardization
-                    # This is the working approach from process_tender.py
-                    import uuid as uuid_module
-                    doc_id = str(uuid_module.uuid4())
-                    job_id = f"analyze_tender_{tdr}_{uuid_module.uuid4()}"
+                chunks, stats = document_service.process_document(
+                    job_id=job_id,
+                    file_path=str(file_path),
+                    doc_id=doc_id,
+                    filename=file_path.name,
+                    save_json=False  # Don't save JSON files during analysis
+                )
 
-                    chunks, stats = pdf_processor.process_pdf(
-                        job_id=job_id,
-                        pdf_path=str(file_path),
-                        doc_id=doc_id,
-                        filename=file_path.name
-                    )
-
-                    if chunks:
-                        all_tender_chunks.extend(chunks)
-                        total_chunks_created += len(chunks)
-                        logger.info(f"[{tdr}] Processed {file_path.name}: {len(chunks)} chunks created")
-                    else:
-                        logger.warning(f"[{tdr}] No chunks extracted from {file_path.name}")
-
+                if chunks:
+                    all_tender_chunks.extend(chunks)
+                    total_chunks_created += len(chunks)
+                    logger.info(f"[{tdr}] Processed {file_path.name}: {len(chunks)} chunks created (type: {file_suffix})")
+                    logger.info(f"[{tdr}] File stats: {stats}")
                 else:
-                    logger.warning(f"[{tdr}] Skipping non-PDF file: {file_path.name} (format: {file_suffix})")
+                    logger.warning(f"[{tdr}] No chunks extracted from {file_path.name}")
 
+            except ValueError as e:
+                logger.warning(f"[{tdr}] Skipping unsupported file: {file_path.name} - {e}")
             except Exception as e:
                 logger.error(f"[{tdr}] Failed to process {file_path.name}: {e}", exc_info=True)
                 # Continue with other files - don't fail entire analysis
@@ -424,6 +421,24 @@ def analyze_tender(db: Session, tdr: str):
             logger.info(f"[{tdr}] Data sheet generated successfully")
         else:
             logger.warning(f"[{tdr}] Failed to generate datasheet")
+
+        # ====================================================================
+        # STEP 5.1: GENERATE RFP SECTIONS ANALYSIS
+        # ====================================================================
+        analysis.status_message = "Analyzing RFP sections"
+        db.commit()
+
+        rfp_sections = _generate_rfp_sections(tender_context, analysis.id, db, tdr)
+        logger.info(f"[{tdr}] Generated {len(rfp_sections)} RFP sections")
+
+        # ====================================================================
+        # STEP 5.2: EXTRACT DOCUMENT TEMPLATES
+        # ====================================================================
+        analysis.status_message = "Extracting document templates"
+        db.commit()
+
+        doc_templates = _extract_document_templates(tender_context, analysis.id, db, tdr)
+        logger.info(f"[{tdr}] Extracted {len(doc_templates)} document templates")
 
         # ====================================================================
         # STEP 6: MARK ANALYSIS AS COMPLETE
@@ -777,35 +792,54 @@ def _generate_comprehensive_datasheet(context: str, scraped_tender, tdr: str) ->
 
         prompt = f"""Based on the tender document, create a comprehensive datasheet in JSON format.
 
-Respond ONLY with valid JSON. Use this exact structure:
+Extract specific information and structure it as items with label, value, type, and highlight fields.
+
+Use this EXACT JSON structure:
 {{
-    "key_tender_details": {{
-        "tender_id": "Tender reference number",
-        "tender_category": "Category of tender",
-        "tendering_authority": "Authority name",
-        "skills_required": ["skill1", "skill2"],
-        "experience_level": "Junior/Mid/Senior",
-        "team_size_required": "Number of resources",
-        "compliance_requirements": ["requirement1"]
-    }},
-    "financial_summary": {{
-        "total_tender_value": "Value in INR",
-        "estimated_monthly_cost": "Cost if known",
-        "bid_security_amount": "EMD amount",
-        "payment_terms": "Payment terms",
-        "currency": "INR"
-    }},
-    "timeline": {{
-        "publish_date": "Publication date",
-        "submission_deadline": "Bid submission deadline",
-        "tender_opening_date": "Bid opening date",
-        "pre_bid_meeting_date": "Pre-bid date if any",
-        "project_duration": "Total duration",
-        "expected_start_date": "Start date"
-    }}
+    "project_information": [
+        {{"label": "Project Name", "value": "Extracted project name", "type": "text", "highlight": true}},
+        {{"label": "Location", "value": "Project location", "type": "text", "highlight": false}},
+        {{"label": "Project Type", "value": "Road/Bridge/Building etc", "type": "text", "highlight": false}},
+        {{"label": "Tendering Authority", "value": "Authority name", "type": "text", "highlight": false}},
+        {{"label": "Tender Category", "value": "Category", "type": "text", "highlight": false}}
+    ],
+    "contract_details": [
+        {{"label": "Contract Value", "value": "Rs. X Crores", "type": "money", "highlight": true}},
+        {{"label": "Contract Duration", "value": "X months", "type": "text", "highlight": false}},
+        {{"label": "Contract Type", "value": "Item Rate/Lump Sum etc", "type": "text", "highlight": false}},
+        {{"label": "Work Classification", "value": "Class A/B etc", "type": "text", "highlight": false}}
+    ],
+    "financial_details": [
+        {{"label": "EMD Amount", "value": "Rs. X Lakhs", "type": "money", "highlight": true}},
+        {{"label": "Tender Fee", "value": "Rs. X", "type": "money", "highlight": false}},
+        {{"label": "Performance Guarantee", "value": "X% of contract value", "type": "text", "highlight": false}},
+        {{"label": "Retention Money", "value": "X%", "type": "percentage", "highlight": false}},
+        {{"label": "Payment Terms", "value": "Monthly/Quarterly", "type": "text", "highlight": false}}
+    ],
+    "technical_summary": [
+        {{"label": "Work Type", "value": "Construction/Maintenance", "type": "text", "highlight": false}},
+        {{"label": "Key Materials", "value": "Cement, Steel, Bitumen", "type": "text", "highlight": false}},
+        {{"label": "Standards", "value": "IRC, IS codes", "type": "text", "highlight": false}},
+        {{"label": "Quality Requirements", "value": "As per specifications", "type": "text", "highlight": false}}
+    ],
+    "important_dates": [
+        {{"label": "Publication Date", "value": "DD/MM/YYYY", "type": "date", "highlight": false}},
+        {{"label": "Pre-bid Meeting", "value": "DD/MM/YYYY", "type": "date", "highlight": true}},
+        {{"label": "Site Visit Deadline", "value": "DD/MM/YYYY", "type": "date", "highlight": false}},
+        {{"label": "Bid Submission Deadline", "value": "DD/MM/YYYY", "type": "date", "highlight": true}},
+        {{"label": "Bid Opening Date", "value": "DD/MM/YYYY", "type": "date", "highlight": true}}
+    ]
 }}
 
-CONTEXT:
+IMPORTANT:
+- Extract ACTUAL values from the tender document
+- If a value is not found, use "N/A" 
+- For money values, use proper Indian format (Rs. X Crores/Lakhs)
+- For dates, use DD/MM/YYYY format
+- Set highlight=true for critical information
+- Generate realistic data based on the tender content
+
+TENDER DOCUMENT:
 {context}
 
 Generate JSON only, no explanations:"""
@@ -830,3 +864,202 @@ Generate JSON only, no explanations:"""
     except Exception as e:
         logger.error(f"[{tdr}] Error generating datasheet: {e}")
         return None
+
+
+# ============================================================================
+# RFP SECTIONS ANALYSIS
+# ============================================================================
+
+def _generate_rfp_sections(context: str, analysis_id, db: Session, tdr: str) -> List[AnalysisRFPSection]:
+    """
+    Generate detailed RFP section breakdown and store in database.
+    """
+    try:
+        logger.info(f"[{tdr}] Generating RFP sections analysis...")
+
+        # Truncate context if too long
+        if len(context) > MAX_CONTEXT_CHARS:
+            context = context[:MAX_CONTEXT_CHARS] + "... [truncated]"
+
+        prompt = f"""
+        Analyze this tender document and break it down into logical sections.
+        For each section, provide a detailed analysis.
+
+        Tender Document:
+        {context}
+
+        IMPORTANT INSTRUCTIONS:
+        1. Identify major sections (e.g., "1.1 Eligibility", "2.1 Technical Requirements", "3.1 Financial Criteria", "Annexure A - BOQ")
+        2. For each section, provide:
+           - section_number: SHORT identifier (e.g., "1.1", "2.3.1", "A", "Annexure-A") - MAXIMUM 100 characters
+           - section_title: Clear descriptive title of the section (e.g., "Eligibility Criteria", "Technical Requirements")
+           - summary: Brief summary of what this section covers
+           - key_requirements: List of important requirements/criteria
+           - compliance_issues: List of potential compliance concerns or unclear items
+           - page_references: List of page numbers where this section appears (estimate if not clear)
+
+        CRITICAL: section_number must be SHORT (under 100 chars) - use numbers, letters, or brief codes.
+        The descriptive text should go in section_title, NOT section_number.
+
+        Return a JSON array of sections:
+        [
+          {{
+            "section_number": "1.1",
+            "section_title": "Eligibility Criteria", 
+            "summary": "This section outlines the minimum eligibility requirements...",
+            "key_requirements": ["Minimum turnover Rs. 50 Cr in last 3 years", "Experience in highway projects"],
+            "compliance_issues": ["Turnover calculation method unclear", "Similar work definition ambiguous"],
+            "page_references": [5, 6, 7]
+          }}
+        ]
+
+        Focus on creating comprehensive sections that cover all important aspects.
+        """
+
+        response = llm_model.generate_content(prompt)
+        if not response or not response.text:
+            logger.error(f"[{tdr}] No response from LLM for RFP sections")
+            return []
+
+        # Parse JSON response
+        json_text = response.text.strip()
+        if json_text.startswith('```json'):
+            json_text = json_text[7:]
+        if json_text.endswith('```'):
+            json_text = json_text[:-3]
+        
+        sections_data = json.loads(json_text)
+        
+        # Create AnalysisRFPSection objects
+        sections = []
+        for section_data in sections_data:
+            # Validate and truncate section_number if too long
+            section_number = section_data.get('section_number', '')
+            if section_number and len(section_number) > 200:
+                logger.warning(f"[{tdr}] Truncating long section_number: '{section_number[:50]}...' (was {len(section_number)} chars)")
+                section_number = section_number[:197] + "..."
+            
+            # Ensure section_title is not too long
+            section_title = section_data.get('section_title', 'Untitled Section')
+            if len(section_title) > 255:
+                logger.warning(f"[{tdr}] Truncating long section_title: '{section_title[:50]}...' (was {len(section_title)} chars)")
+                section_title = section_title[:252] + "..."
+                
+            section = AnalysisRFPSection(
+                analysis_id=analysis_id,
+                section_number=section_number,
+                section_title=section_title,
+                summary=section_data.get('summary'),
+                key_requirements=section_data.get('key_requirements', []),
+                compliance_issues=section_data.get('compliance_issues', []),
+                page_references=section_data.get('page_references', [])
+            )
+            db.add(section)
+            sections.append(section)
+        
+        db.commit()
+        logger.info(f"[{tdr}] Created {len(sections)} RFP sections in database")
+        return sections
+
+    except json.JSONDecodeError as e:
+        logger.error(f"[{tdr}] Failed to parse JSON for RFP sections: {e}")
+        return []
+    except Exception as e:
+        logger.error(f"[{tdr}] Error generating RFP sections: {e}")
+        return []
+
+
+# ============================================================================
+# DOCUMENT TEMPLATES EXTRACTION
+# ============================================================================
+
+def _extract_document_templates(context: str, analysis_id, db: Session, tdr: str) -> List[AnalysisDocumentTemplate]:
+    """
+    Extract document templates and forms from the tender and store in database.
+    """
+    try:
+        logger.info(f"[{tdr}] Extracting document templates...")
+
+        # Truncate context if too long
+        if len(context) > MAX_CONTEXT_CHARS:
+            context = context[:MAX_CONTEXT_CHARS] + "... [truncated]"
+
+        prompt = f"""
+        Analyze this tender document and identify all document templates, forms, and formats that bidders need to submit.
+
+        Tender Document:
+        {context}
+
+        Instructions:
+        1. Look for sections that mention forms, templates, declarations, certificates, or specific submission formats
+        2. Common templates include: EMD format, Technical bid format, Financial bid format, Experience certificate format, etc.
+        3. For each template, provide:
+           - template_name: Clear name of the template/form
+           - description: What this template is for and when it's required
+           - required_format: Format required (PDF, Excel, Hard Copy, etc.)
+           - content_preview: Brief preview of template content or structure
+           - page_references: Page numbers where this template is mentioned
+
+        Return a JSON array of templates:
+        [
+          {{
+            "template_name": "EMD Bank Guarantee Format",
+            "description": "Format for submitting Earnest Money Deposit bank guarantee as per Annexure",
+            "required_format": "Original hard copy + PDF scan",
+            "content_preview": "Bank Guarantee for Rs. [Amount] in favor of [Authority]...",
+            "page_references": [25, 26]
+          }}
+        ]
+
+        Focus on actual submission requirements and formats that bidders must follow.
+        """
+
+        response = llm_model.generate_content(prompt)
+        if not response or not response.text:
+            logger.error(f"[{tdr}] No response from LLM for document templates")
+            return []
+
+        # Parse JSON response
+        json_text = response.text.strip()
+        if json_text.startswith('```json'):
+            json_text = json_text[7:]
+        if json_text.endswith('```'):
+            json_text = json_text[:-3]
+        
+        templates_data = json.loads(json_text)
+        
+        # Create AnalysisDocumentTemplate objects
+        templates = []
+        for template_data in templates_data:
+            # Validate and truncate fields if too long
+            template_name = template_data.get('template_name', 'Untitled Template')
+            if len(template_name) > 255:
+                logger.warning(f"[{tdr}] Truncating long template_name: '{template_name[:50]}...' (was {len(template_name)} chars)")
+                template_name = template_name[:252] + "..."
+            
+            required_format = template_data.get('required_format', '')
+            if required_format and len(required_format) > 100:
+                logger.warning(f"[{tdr}] Truncating long required_format: '{required_format[:50]}...' (was {len(required_format)} chars)")
+                required_format = required_format[:97] + "..."
+                
+            template = AnalysisDocumentTemplate(
+                analysis_id=analysis_id,
+                template_name=template_name,
+                description=template_data.get('description'),
+                required_format=required_format,
+                content_preview=template_data.get('content_preview'),
+                page_references=template_data.get('page_references', [])
+            )
+            db.add(template)
+            templates.append(template)
+        
+        db.commit()
+        logger.info(f"[{tdr}] Created {len(templates)} document templates in database")
+        return templates
+
+    except json.JSONDecodeError as e:
+        logger.error(f"[{tdr}] Failed to parse JSON for document templates: {e}")
+        return []
+    except Exception as e:
+        logger.error(f"[{tdr}] Error extracting document templates: {e}")
+        return []
