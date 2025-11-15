@@ -107,7 +107,8 @@ class AnalysisDocumentTemplate(Base):
     description: Mapped[Optional[str]] = mapped_column(Text)
     required_format: Mapped[Optional[str]] = mapped_column(String(100))  # Increased from 50 to 100
     content_preview: Mapped[Optional[str]] = mapped_column(Text)
-    page_references: Mapped[Optional[list]] = mapped_column(JSON)
+    file_references: Mapped[list[str]] = mapped_column(JSON)
+    page_references: Mapped[list[str]] = mapped_column(JSON)
 
     # Relationships
     analysis: Mapped["TenderAnalysis"] = relationship(back_populates="document_templates")
