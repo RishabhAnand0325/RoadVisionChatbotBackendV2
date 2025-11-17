@@ -179,12 +179,12 @@ class TenderAnalysisRead(BaseModel):
     created_at: datetime
     updated_at: datetime
     analysis_started_at: datetime
-    analysis_completed_at: datetime
+    analysis_completed_at: Optional[datetime] = None
     
     # Analysis Results - JSON columns (untyped to avoid circular imports)
-    one_pager_json: OnePagerSchema
-    scope_of_work_json: ScopeOfWorkSchema
-    data_sheet_json: DataSheetSchema
+    one_pager_json: Optional[OnePagerSchema] = None
+    scope_of_work_json: Optional[ScopeOfWorkSchema] = None
+    data_sheet_json: Optional[DataSheetSchema] = None
 
     class Config:
         from_attributes = True

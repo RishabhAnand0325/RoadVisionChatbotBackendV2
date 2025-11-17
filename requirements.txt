@@ -1,4 +1,5 @@
 aiohappyeyeballs
+xlrd
 openpyxl
 aiohttp
 aiosignal

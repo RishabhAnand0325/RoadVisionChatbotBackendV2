@@ -23,11 +23,12 @@ async def generate_and_save_bid_synopsis(
     """
     try:
         # Query Weaviate for detailed eligibility/qualification content
-        from app.db.vector_store import get_vector_store_manager
+        from app.core.services import vector_store
+        if not vector_store or not vector_store.client:
+            raise Exception("Weaviate client not initialized")
         weaviate_content = []
         
         try:
-            vector_manager = get_vector_store_manager()
             # Search for eligibility, qualification, and financial requirement content
             search_queries = [
                 "eligibility criteria requirements conditions",
@@ -39,16 +40,16 @@ async def generate_and_save_bid_synopsis(
             ]
             
             for query in search_queries:
-                results = vector_manager.similarity_search(
-                    collection_name=f"tender_{analysis.tender_id}",
+                results = vector_store.similarity_search(
+                    collection_name=f"Tender_{analysis.tender_id}",
                     query_text=query,
                     limit=5
                 )
                 for result in results:
-                    if hasattr(result, 'payload') and result.payload:
-                        content = result.payload.get('text', '')
-                        if len(content) > 100:  # Only include substantial content
-                            weaviate_content.append(content)
+                    # result is a tuple: (doc_content, properties, similarity)
+                    doc_content, properties, similarity = result
+                    if doc_content and len(doc_content) > 100:  # Only include substantial content
+                        weaviate_content.append(doc_content)
             
             print(f"📚 Retrieved {len(weaviate_content)} detailed chunks from Weaviate")
         except Exception as weaviate_error:

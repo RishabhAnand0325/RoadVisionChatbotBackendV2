@@ -83,7 +83,7 @@ class AnalysisRFPSection(Base):
     """
     __tablename__ = 'analysis_rfp_sections'
     id: Mapped[uuid.UUID] = mapped_column(postgresql.UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    analysis_id: Mapped[uuid.UUID] = mapped_column(ForeignKey('tender_analysis.id'), index=True)
+    analysis_id: Mapped[uuid.UUID] = mapped_column(ForeignKey('tender_analysis.id', ondelete="CASCADE"), index=True)
     
     section_number: Mapped[Optional[str]] = mapped_column(String(200))  # Increased from 50 to 200
     section_title: Mapped[str] = mapped_column(String(255))
@@ -102,7 +102,7 @@ class AnalysisDocumentTemplate(Base):
     """
     __tablename__ = 'analysis_document_templates'
     id: Mapped[uuid.UUID] = mapped_column(postgresql.UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    analysis_id: Mapped[uuid.UUID] = mapped_column(ForeignKey('tender_analysis.id'), index=True)
+    analysis_id: Mapped[uuid.UUID] = mapped_column(ForeignKey('tender_analysis.id', ondelete="CASCADE"), index=True)
     
     template_name: Mapped[str] = mapped_column(String(255))
     description: Mapped[Optional[str]] = mapped_column(Text)

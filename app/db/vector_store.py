@@ -17,6 +17,12 @@ class VectorStoreManager:
         self.embedding_model = embedding_model
         print("✅ VectorStoreManager initialized")
     
+    def similarity_search(self, collection_name: str, query_text: str, limit: int):
+        if not self.client:
+            return []
+        collection = self.client.collections.get(collection_name)
+        return self.query(collection, query_text, limit)
+
     def get_or_create_collection(self, chat_id: str) -> Collection:
         """Get or create collection for chat in Weaviate."""
         if not self.client:
