@@ -112,6 +112,12 @@ def check_analysis_data(tender_id="51705827"):
                     print(f"   Description: {template.description[:80]}...")
                 if template.required_format:
                     print(f"   Format: {template.required_format}")
+                if template.file_reference:
+                    print(f"   Source File: {template.file_reference}")
+                if template.page_references:
+                    print(f"   Pages: {template.page_references}")
+                else:
+                    print(f"   Pages: Not specified")
                 print()
         else:
             print("❌ No document templates found")
@@ -143,6 +149,7 @@ def check_analysis_data(tender_id="51705827"):
                     "description": template.description,
                     "required_format": template.required_format,
                     "content_preview": template.content_preview,
+                    "file_reference": template.file_reference,
                     "page_references": template.page_references
                 }
                 for template in templates

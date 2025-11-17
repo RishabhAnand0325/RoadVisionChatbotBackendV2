@@ -25,7 +25,8 @@ class RequirementItem(BaseModel):
     """Single eligibility requirement item."""
     description: str
     requirement: str
-    ceigallValue: Optional[str] = ""
+    extractedValue: Optional[str] = ""  # Value extracted from tender documents
+    ceigallValue: Optional[str] = ""       # Calculated CEIGALL value
 
 
 class AllRequirementsResponse(BaseModel):

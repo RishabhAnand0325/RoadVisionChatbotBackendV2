@@ -369,10 +369,36 @@ def analyze_tender(db: Session, tdr: str):
         # ====================================================================
         logger.info(f"[{tdr}] Building context for LLM analysis")
 
-        # Reconstruct text from chunks for LLM context
-        # Each chunk is a dict with 'content' key
-        all_text = "\n\n".join([chunk.get('content', '') for chunk in all_tender_chunks if chunk.get('content')])
-        logger.info(f"[{tdr}] Reconstructed {len(all_text):,} characters from {len(all_tender_chunks)} chunks for LLM context")
+        # Reconstruct text from chunks for LLM context with file markers and page numbers
+        # Each chunk is a dict with 'content' key and metadata with source filename and page info
+        file_content_map = {}
+        for chunk in all_tender_chunks:
+            content = chunk.get('content', '')
+            if not content:
+                continue
+            source_file = chunk.get('metadata', {}).get('source', 'unknown')
+            page_number = chunk.get('page_number') or chunk.get('metadata', {}).get('page_number')
+            
+            if source_file not in file_content_map:
+                file_content_map[source_file] = []
+            
+            # Include page number in content if available
+            if page_number is not None:
+                content_with_page = f"[Page {page_number}] {content}"
+            else:
+                content_with_page = content
+                
+            file_content_map[source_file].append(content_with_page)
+        
+        # Build text with file markers
+        all_text_parts = []
+        for filename, contents in file_content_map.items():
+            all_text_parts.append(f"\n\n=== FILE: {filename} ===\n")
+            all_text_parts.extend(contents)
+            all_text_parts.append(f"\n=== END FILE: {filename} ===\n")
+        
+        all_text = "\n\n".join(all_text_parts)
+        logger.info(f"[{tdr}] Reconstructed {len(all_text):,} characters from {len(all_tender_chunks)} chunks across {len(file_content_map)} files for LLM context")
 
         tender_context = _build_tender_context(tender, scraped_tender, all_text)
 
@@ -998,16 +1024,24 @@ def _extract_document_templates(context: str, analysis_id, db: Session, tdr: str
            - description: What this template is for and when it's required
            - required_format: Format required (PDF, Excel, Hard Copy, etc.)
            - content_preview: Brief preview of template content or structure
-           - page_references: Page numbers where this template is mentioned
+           - file_reference: The filename where this template is mentioned (from === FILE: filename === markers)
+           - page_references: Page numbers where this template appears. Look for [Page X] markers or estimate based on document flow. Use specific page numbers or "1", "2", etc. If uncertain, still provide best estimate.
+
+        IMPORTANT: 
+        - Pay attention to === FILE: filename === markers to identify which file contains each template
+        - Look for [Page X] markers in the content to determine page numbers
+        - If you see content structure or document flow, estimate page numbers rather than leaving empty
+        - For single-page documents, use ["1"] rather than leaving empty
 
         Return a JSON array of templates:
         [
           {{
             "template_name": "EMD Bank Guarantee Format",
             "description": "Format for submitting Earnest Money Deposit bank guarantee as per Annexure",
-            "required_format": "Original hard copy + PDF scan",
+            "required_format": "Original hard copy + PDF scan", 
             "content_preview": "Bank Guarantee for Rs. [Amount] in favor of [Authority]...",
-            "page_references": [25, 26]
+            "file_reference": "2911ii.pdf",
+            "page_references": ["1", "2"]
           }}
         ]
 
@@ -1042,12 +1076,19 @@ def _extract_document_templates(context: str, analysis_id, db: Session, tdr: str
                 logger.warning(f"[{tdr}] Truncating long required_format: '{required_format[:50]}...' (was {len(required_format)} chars)")
                 required_format = required_format[:97] + "..."
                 
+            # Get file_reference and validate
+            file_reference = template_data.get('file_reference', '')
+            if file_reference and len(file_reference) > 255:
+                logger.warning(f"[{tdr}] Truncating long file_reference: '{file_reference[:50]}...' (was {len(file_reference)} chars)")
+                file_reference = file_reference[:252] + "..."
+                
             template = AnalysisDocumentTemplate(
                 analysis_id=analysis_id,
                 template_name=template_name,
                 description=template_data.get('description'),
                 required_format=required_format,
                 content_preview=template_data.get('content_preview'),
+                file_reference=file_reference,
                 page_references=template_data.get('page_references', [])
             )
             db.add(template)
