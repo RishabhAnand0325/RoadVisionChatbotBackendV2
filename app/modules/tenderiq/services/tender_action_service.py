@@ -58,6 +58,6 @@ class TenderActionService:
             updated_tender = tender
 
         if action_to_log:
-            self.tender_repo.log_action(tender_id, user_id, action_to_log, notes)
+            self.tender_repo.log_action(updated_tender.id, user_id, action_to_log, notes)
         
         return updated_tender
