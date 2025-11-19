@@ -1,7 +1,20 @@
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import (Column, String, UUID, Boolean, DateTime,
-                        ForeignKey, Integer, Text, JSON, Enum, Date)
+
+from sqlalchemy import (
+    Column,
+    String,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Integer,
+    Text,
+    JSON,
+    Enum,
+    Date,
+)
+from sqlalchemy.dialects.postgresql import UUID
+
 from app.db.database import Base
 
 class UserRole(str, Enum):
