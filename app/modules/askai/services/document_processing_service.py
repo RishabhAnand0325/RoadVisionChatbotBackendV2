@@ -5,7 +5,7 @@ from datetime import datetime
 
 from sqlalchemy.orm import Session
 
-from app.core.services import pdf_processor, vector_store
+from app.core import services
 from app.core.global_stores import upload_jobs
 from app.db.database import SessionLocal
 from app.modules.askai.db.models import Document as SQLDocument, DocumentChunk
@@ -24,6 +24,10 @@ def process_uploaded_pdf(temp_path: str, chat_id_str: str, filename: str, job_id
     upload_job.stage = ProcessingStage.EXTRACTING_CONTENT
     upload_job.progress = 0
 
+    # Get lazy-loaded services
+    pdf_processor = services.get_pdf_processor()
+    vector_store = services.get_vector_store()
+    
     if not vector_store:
         raise Exception("Vector store is not initialized.")
 

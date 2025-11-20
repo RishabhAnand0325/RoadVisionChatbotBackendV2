@@ -10,7 +10,7 @@ from sse_starlette.sse import EventSourceResponse
 from sqlalchemy.orm import Session
 from app.modules.askai.models.document import AddDriveRequest, ChatDocumentsResponse, DriveFolder, ProcessingJob, ProcessingStage, ProcessingStatus, UploadAcceptedResponse, DocumentMetadata, UploadJob
 from app.modules.askai.db.models import Chat as SQLChat, Document as SQLDocument
-from app.core.services import vector_store
+from app.core import services
 from app.core.global_stores import upload_jobs
 from app.db.database import get_db_session
 from app.config import settings
