@@ -154,6 +154,14 @@ class ScrapedTenderRead(BaseModel):
 
     # TenderDetailOtherDetail
     information_source: str
+    # Extra fields merged from Tender table for wishlist/export
+    length_km: Optional[float] = None
+    per_km_cost: Optional[float] = None
+    span_length: Optional[float] = None
+    road_work_amount: Optional[float] = None
+    structure_work_amount: Optional[float] = None
+    remarks: Optional[str] = None
+    current_status: Optional[str] = None
     class Config:
         from_attributes = True
 

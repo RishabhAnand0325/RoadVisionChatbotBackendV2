@@ -67,8 +67,9 @@ try:
         if not weaviate_client.is_ready():
             raise Exception("Weaviate is not ready")
         print("✅ Weaviate client connected")
-        # vector_store will be initialized lazily when embedding model is loaded
-        vector_store = None
+        # Initialize vector store immediately with lazy embedding model
+        vector_store = VectorStoreManager(weaviate_client, get_embedding_model())
+        print("✅ Vector store initialized")
     except Exception as e:
         print(f"❌ Could not connect to Weaviate: {e}")
         weaviate_client = None

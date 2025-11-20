@@ -81,6 +81,11 @@ class ScopeOfWorkProjectDetailsSchema(BaseModel):
     total_area: Optional[str] = None
     duration: Optional[str] = None
     contract_value: Optional[str] = None
+    # Engineering metrics for Excel export
+    road_length_km: Optional[float] = 0.0
+    span_length_m: Optional[float] = 0.0
+    road_work_value_cr: Optional[float] = 0.0
+    structure_work_value_cr: Optional[float] = 0.0
 
 
 class ScopeOfWorkSchema(BaseModel):

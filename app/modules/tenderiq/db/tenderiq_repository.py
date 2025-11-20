@@ -33,7 +33,9 @@ class TenderIQRepository:
         """
         Get all tenders that have been marked as wishlisted.
         """
-        return self.db.query(Tender, ScrapedTender).join(ScrapedTender, Tender.id == ScrapedTender.id).filter(Tender.is_wishlisted).all()
+        return self.db.query(Tender, ScrapedTender).join(
+            ScrapedTender, Tender.tender_ref_number == ScrapedTender.tdr
+        ).filter(Tender.is_wishlisted).all()
 
     def get_tender_by_id(self, tender_id: UUID) -> Optional[ScrapedTender]:
         """

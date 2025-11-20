@@ -734,10 +734,14 @@ Respond ONLY with valid JSON. Use this exact structure:
     "project_details": {{
         "project_name": "Project name/title",
         "location": "Project location/address",
-        "total_length": "length in km if applicable",
+        "total_length": "length in km (EXTRACT NUMERIC VALUE ONLY, e.g., '45.5 km')",
         "total_area": "total area in square meters or relevant units",
         "duration": "project duration/timeline",
-        "contract_value": "total project value with currency"
+        "contract_value": "total project value with currency",
+        "road_length_km": 0.0,
+        "span_length_m": 0.0,
+        "road_work_value_cr": 0.0,
+        "structure_work_value_cr": 0.0
     }},
     "work_packages": [
         {{
@@ -790,6 +794,24 @@ IMPORTANT NOTES:
 - Clearly identify scope exclusions
 - Provide realistic quantities and units for components
 - Use actual values from the tender document
+
+**CRITICAL - Engineering Metrics Extraction:**
+In project_details, you MUST extract these specific values:
+1. "road_length_km": Total road length in kilometers as NUMERIC value (e.g., 45.5, not "45.5 km")
+2. "span_length_m": Total bridge/span length in meters as NUMERIC value (if applicable, otherwise 0)
+3. "road_work_value_cr": Cost of road work in crores as NUMERIC value (if breakdown available, otherwise 0)
+4. "structure_work_value_cr": Cost of structure/bridge work in crores as NUMERIC value (if breakdown available, otherwise 0)
+
+Look for these in:
+- Project details section
+- Bill of quantities (BOQ)
+- Scope of work descriptions
+- Work package details
+- Any mention of "road", "highway", "length", "km", "span", "bridge", "road work", "structure work"
+
+If exact breakdown not available:
+- For road projects: Estimate road_work as 70% of total value, structure_work as 30%
+- Set values to 0 if not a road/infrastructure project
 
 CONTEXT:
 {context}
