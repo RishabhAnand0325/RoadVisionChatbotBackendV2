@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.modules.analyze.models.pydantic_models import RFPSectionSchema
 from app.modules.tenderiq.db.schema import Tender
 
-from ..db.schema import AnalysisRFPSection, TenderAnalysis
+from ..db.schema import AnalysisRFPSection, AnalysisDocumentTemplate, TenderAnalysis
 
 def get_wishlisted_tenders(db: Session) -> List[Tender]:
     wishlisted = db.query(Tender).filter(Tender.is_wishlisted == True).all()
@@ -73,6 +73,14 @@ def tender_is_analyzed(db: Session, tender_id: str) -> Optional[TenderAnalysis]:
 def get_rfp_sections(db: Session, analysis_id: UUID) -> List[AnalysisRFPSection]:
     return (
         db.query(AnalysisRFPSection)
+        .filter_by(analysis_id=analysis_id)
+        .all()
+    )
+
+def get_document_templates(db: Session, analysis_id: UUID) -> List[AnalysisDocumentTemplate]:
+    """Fetch all document templates for a given analysis."""
+    return (
+        db.query(AnalysisDocumentTemplate)
         .filter_by(analysis_id=analysis_id)
         .all()
     )

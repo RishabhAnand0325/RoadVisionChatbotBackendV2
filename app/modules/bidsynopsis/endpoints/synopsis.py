@@ -3,7 +3,12 @@ from sqlalchemy.orm import Session
 from uuid import UUID
 
 from app.db.database import get_db_session
-from app.modules.bidsynopsis.pydantic_models import BidSynopsisResponse, ErrorResponse
+from app.modules.bidsynopsis.pydantic_models import (
+    BidSynopsisResponse,
+    ErrorResponse,
+    SaveBidSynopsisRequest,
+    SaveBidSynopsisResponse
+)
 from app.modules.bidsynopsis.services.bid_synopsis_service import BidSynopsisService
 
 router = APIRouter()
@@ -105,4 +110,71 @@ def get_bid_synopsis(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to generate bid synopsis: {str(e)}"
+        )
+
+
+@router.post(
+    "/synopsis/save",
+    response_model=SaveBidSynopsisResponse,
+    tags=["BidSynopsis"],
+    summary="Save edited bid synopsis data",
+    description="Saves user-edited requirement and ceigall data for a tender.",
+    responses={
+        200: {
+            "description": "Bid synopsis saved successfully",
+            "model": SaveBidSynopsisResponse
+        },
+        400: {
+            "description": "Invalid request data",
+            "model": ErrorResponse
+        },
+        500: {
+            "description": "Internal server error",
+            "model": ErrorResponse
+        }
+    }
+)
+def save_bid_synopsis(
+    request: SaveBidSynopsisRequest,
+    db: Session = Depends(get_db_session)
+) -> SaveBidSynopsisResponse:
+    """
+    Save edited bid synopsis data including:
+    - Edited requirement text for each requirement item
+    - Edited extracted values for each requirement item
+    - CEIGALL company data for each requirement item
+
+    **Request Body:**
+    - `tender_id` (str): The tender reference number
+    - `user_id` (str, optional): The user ID making the changes
+    - `ceigall_data` (Dict[int, str]): Index -> value mapping for CEIGALL data
+    - `requirement_data` (Dict[int, str]): Index -> edited requirement text mapping
+    - `extracted_value_data` (Dict[int, str]): Index -> edited extracted value mapping
+
+    **Response:**
+    - `success` (bool): Whether the save operation succeeded
+    - `message` (str): Status message
+    - `tender_id` (str): The tender ID that was updated
+    """
+    try:
+        service = BidSynopsisService()
+        result = service.save_bid_synopsis(db, request)
+
+        return SaveBidSynopsisResponse(
+            success=True,
+            message="Bid synopsis data saved successfully",
+            tender_id=request.tender_id
+        )
+
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+
+    except Exception as e:
+        print(f"❌ Error saving bid synopsis for tender {request.tender_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to save bid synopsis: {str(e)}"
         )

@@ -145,6 +145,28 @@ def get_wishlisted_tenders_with_history(db: Session = Depends(get_db_session)):
     service = TenderFilterService()
     return service.get_wishlisted_tenders_with_history(db)
 
+@router.get(
+    "/favourite",
+    response_model=list[Tender],
+    tags=["TenderIQ"],
+    summary="Get all favorite tenders"
+)
+def get_favorite_tenders(db: Session = Depends(get_db_session)):
+    """Retrieves all tenders that have been marked as favorites."""
+    service = TenderFilterService()
+    return service.get_favorited_tenders(db)
+
+@router.get(
+    "/archived",
+    response_model=list[Tender],
+    tags=["TenderIQ"],
+    summary="Get all archived tenders"
+)
+def get_archived_tenders(db: Session = Depends(get_db_session)):
+    """Retrieves all tenders that have been archived."""
+    service = TenderFilterService()
+    return service.get_archived_tenders(db)
+
 @router.post(
     "/tenders/{tender_id}/actions",
     tags=["TenderIQ"],
