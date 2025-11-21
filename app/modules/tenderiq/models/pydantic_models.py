@@ -56,6 +56,11 @@ class Tender(BaseModel):
     information_source: Optional[str] = None
     files: list[TenderFile]
     dms_folder_id: Optional[UUID] = None
+    
+    # Action flags - These are from the tenders table, not scraped_tenders
+    is_favorite: Optional[bool] = False
+    is_wishlisted: Optional[bool] = False
+    is_archived: Optional[bool] = False
 
     model_config = ConfigDict(from_attributes=True)
 

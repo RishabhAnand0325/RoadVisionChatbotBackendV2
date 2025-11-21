@@ -13,21 +13,31 @@ def get_tenders_from_category(db: Session, query: ScrapedTenderQuery, offset: in
 
     base_query = base_query.filter(cast(ScrapedTender.tender_value, Float) >= 100000000)
 
-    return (
+    tenders = (
         base_query
         .options(joinedload(ScrapedTender.files))
         .offset(offset)
         .limit(limit)
         .all()
     )
+    
+    # Enrich with action flags
+    from app.modules.tenderiq.db.tenderiq_repository import TenderIQRepository
+    repo = TenderIQRepository(db)
+    return repo.enrich_scraped_tenders_with_flags(tenders)
 
 def get_all_tenders_from_category(db: Session, query: ScrapedTenderQuery) -> List[ScrapedTender]:
-    return (
+    tenders = (
         db.query(ScrapedTender)
         .filter(ScrapedTender.query_id == query.id)
         .options(joinedload(ScrapedTender.files))
         .all()
     )
+    
+    # Enrich with action flags
+    from app.modules.tenderiq.db.tenderiq_repository import TenderIQRepository
+    repo = TenderIQRepository(db)
+    return repo.enrich_scraped_tenders_with_flags(tenders)
 
 def get_all_categories(db: Session, scrape_run: ScrapeRun) -> List[ScrapedTenderQuery]:
     return (

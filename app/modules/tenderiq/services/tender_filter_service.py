@@ -55,107 +55,110 @@ class TenderFilterService:
             tenders_table = tender.tuple()[0]
             scraped_tender_table = tender.tuple()[1]
             analysis = analysis_repo.get_analysis_data(db, str(tenders_table.tender_ref_number))
+            
+            # Build full_scraped_details by merging scraped_tender_table and Tender table extras
+            full_scraped = None
+            if scraped_tender_table:
+                # start with scraped model dict
+                try:
+                    scraped_dict = ScrapedTenderRead.model_validate(scraped_tender_table).model_dump()
+                except Exception:
+                    # fallback: shallow attribute extraction
+                    scraped_dict = {k: getattr(scraped_tender_table, k, None) for k in dir(scraped_tender_table) if not k.startswith('_')}
+
+                # Extract engineering metrics from analysis or tender table
+                length_km = None
+                road_work_amount = None
+                structure_work_amount = None
+                span_length = None
+                
+                # FIRST PRIORITY: Try to extract from analysis scope_of_work_json project_details
+                if analysis and analysis.scope_of_work_json:
+                    try:
+                        scope = analysis.scope_of_work_json
+                        if isinstance(scope, dict) and 'project_details' in scope:
+                            details = scope['project_details']
+                            if isinstance(details, dict):
+                                # Get numeric fields directly (new AI-extracted values)
+                                length_km = details.get('road_length_km') or details.get('total_length_km')
+                                span_length = details.get('span_length_m')
+                                road_work_amount = details.get('road_work_value_cr')
+                                structure_work_amount = details.get('structure_work_value_cr')
+                                
+                                # If not found in numeric fields, try parsing from text fields
+                                if not length_km:
+                                    total_length_str = details.get('total_length', '')
+                                    if total_length_str and 'km' in str(total_length_str).lower():
+                                        import re
+                                        match = re.search(r'([\d.,]+)\s*km', str(total_length_str), re.IGNORECASE)
+                                        if match:
+                                            length_km = float(match.group(1).replace(',', ''))
+                    except Exception as e:
+                        print(f"Error extracting from scope_of_work: {e}")
+
+                # Fallback to Tender table if analysis didn't have these values
+                if length_km is None:
+                    length_km = float(tenders_table.length_km) if getattr(tenders_table, 'length_km', None) is not None else None
+                if span_length is None:
+                    span_length = float(tenders_table.span_length) if getattr(tenders_table, 'span_length', None) is not None else None
+                if road_work_amount is None:
+                    road_work_amount = float(tenders_table.road_work_amount) if getattr(tenders_table, 'road_work_amount', None) is not None else None
+                if structure_work_amount is None:
+                    structure_work_amount = float(tenders_table.structure_work_amount) if getattr(tenders_table, 'structure_work_amount', None) is not None else None
+                
+                # Calculate per_km_cost if we have length and value
+                per_km_cost = None
+                if length_km and length_km > 0:
+                    try:
+                        value_float = self._convert_word_currency_to_number(str(scraped_tender_table.value))
+                        if value_float > 0:
+                            per_km_cost = value_float / length_km
+                    except Exception:
+                        pass
+
+                # add Tender table extra fields
+                remarks_text = None
+                if getattr(tenders_table, 'description', None):
+                    remarks_text = str(tenders_table.description).strip()
+                elif scraped_tender_table and hasattr(scraped_tender_table, 'tender_brief'):
+                    remarks_text = str(scraped_tender_table.tender_brief).strip()
+                
+                # Clean up remarks - remove TDR prefix and clean text
+                if remarks_text:
+                    import re
+                    # Remove "TDR:12345 tender for" pattern at the start
+                    remarks_text = re.sub(r'^TDR:\d+\s+(?:tender for\s+)?', '', remarks_text, flags=re.IGNORECASE)
+                    # Remove extra whitespace
+                    remarks_text = ' '.join(remarks_text.split())
+                    # Capitalize first letter
+                    if remarks_text:
+                        remarks_text = remarks_text[0].upper() + remarks_text[1:] if len(remarks_text) > 1 else remarks_text.upper()
+                
+                # Format status nicely
+                status_val = getattr(tenders_table, 'review_status', None) or getattr(tenders_table, 'status', None)
+                current_status = str(status_val).replace('_', ' ').title() if status_val else "Not Reviewed"
+                
+                scraped_dict.update({
+                    "length_km": length_km,
+                    "per_km_cost": per_km_cost,
+                    "span_length": span_length,
+                    "road_work_amount": road_work_amount,
+                    "structure_work_amount": structure_work_amount,
+                    "remarks": remarks_text,
+                    "current_status": current_status
+                })
+
+                try:
+                    full_scraped = ScrapedTenderRead.model_validate(scraped_dict)
+                except Exception:
+                    full_scraped = None
+
+            # Create history data for all wishlisted tenders (with or without analysis)
             if analysis is not None:
                 print(analysis.progress, analysis.tender_id)
-                # Build full_scraped_details by merging scraped_tender_table and Tender table extras
-                full_scraped = None
-                if scraped_tender_table:
-                    # start with scraped model dict
-                    try:
-                        scraped_dict = ScrapedTenderRead.model_validate(scraped_tender_table).model_dump()
-                    except Exception:
-                        # fallback: shallow attribute extraction
-                        scraped_dict = {k: getattr(scraped_tender_table, k, None) for k in dir(scraped_tender_table) if not k.startswith('_')}
-
-                    # Extract engineering metrics from analysis or tender table
-                    length_km = None
-                    road_work_amount = None
-                    structure_work_amount = None
-                    span_length = None
-                    
-                    # FIRST PRIORITY: Try to extract from analysis scope_of_work_json project_details
-                    if analysis and analysis.scope_of_work_json:
-                        try:
-                            scope = analysis.scope_of_work_json
-                            if isinstance(scope, dict) and 'project_details' in scope:
-                                details = scope['project_details']
-                                if isinstance(details, dict):
-                                    # Get numeric fields directly (new AI-extracted values)
-                                    length_km = details.get('road_length_km') or details.get('total_length_km')
-                                    span_length = details.get('span_length_m')
-                                    road_work_amount = details.get('road_work_value_cr')
-                                    structure_work_amount = details.get('structure_work_value_cr')
-                                    
-                                    # If not found in numeric fields, try parsing from text fields
-                                    if not length_km:
-                                        total_length_str = details.get('total_length', '')
-                                        if total_length_str and 'km' in str(total_length_str).lower():
-                                            import re
-                                            match = re.search(r'([\d.,]+)\s*km', str(total_length_str), re.IGNORECASE)
-                                            if match:
-                                                length_km = float(match.group(1).replace(',', ''))
-                        except Exception as e:
-                            print(f"Error extracting from scope_of_work: {e}")
-
-                    # Fallback to Tender table if analysis didn't have these values
-                    if length_km is None:
-                        length_km = float(tenders_table.length_km) if getattr(tenders_table, 'length_km', None) is not None else None
-                    if span_length is None:
-                        span_length = float(tenders_table.span_length) if getattr(tenders_table, 'span_length', None) is not None else None
-                    if road_work_amount is None:
-                        road_work_amount = float(tenders_table.road_work_amount) if getattr(tenders_table, 'road_work_amount', None) is not None else None
-                    if structure_work_amount is None:
-                        structure_work_amount = float(tenders_table.structure_work_amount) if getattr(tenders_table, 'structure_work_amount', None) is not None else None
-                    
-                    # Calculate per_km_cost if we have length and value
-                    per_km_cost = None
-                    if length_km and length_km > 0:
-                        try:
-                            value_float = self._convert_word_currency_to_number(str(scraped_tender_table.value))
-                            if value_float > 0:
-                                per_km_cost = value_float / length_km
-                        except Exception:
-                            pass
-
-                    # add Tender table extra fields
-                    remarks_text = None
-                    if getattr(tenders_table, 'description', None):
-                        remarks_text = str(tenders_table.description).strip()
-                    elif scraped_tender_table and hasattr(scraped_tender_table, 'tender_brief'):
-                        remarks_text = str(scraped_tender_table.tender_brief).strip()
-                    
-                    # Clean up remarks - remove TDR prefix and clean text
-                    if remarks_text:
-                        import re
-                        # Remove "TDR:12345 tender for" pattern at the start
-                        remarks_text = re.sub(r'^TDR:\d+\s+(?:tender for\s+)?', '', remarks_text, flags=re.IGNORECASE)
-                        # Remove extra whitespace
-                        remarks_text = ' '.join(remarks_text.split())
-                        # Capitalize first letter
-                        if remarks_text:
-                            remarks_text = remarks_text[0].upper() + remarks_text[1:] if len(remarks_text) > 1 else remarks_text.upper()
-                    
-                    # Format status nicely
-                    status_val = getattr(tenders_table, 'review_status', None) or getattr(tenders_table, 'status', None)
-                    current_status = str(status_val).replace('_', ' ').title() if status_val else "Not Reviewed"
-                    
-                    scraped_dict.update({
-                        "length_km": length_km,
-                        "per_km_cost": per_km_cost,
-                        "span_length": span_length,
-                        "road_work_amount": road_work_amount,
-                        "structure_work_amount": structure_work_amount,
-                        "remarks": remarks_text,
-                        "current_status": current_status
-                    })
-
-                    try:
-                        full_scraped = ScrapedTenderRead.model_validate(scraped_dict)
-                    except Exception:
-                        full_scraped = None
-
-                history_data = HistoryData(
-                id=str(tenders_table.id),
+                
+            history_data = HistoryData(
+                id=str(scraped_tender_table.id),  # Use ScrapedTender ID (matches Tender ID after fix)
                 title=str(tenders_table.tender_title),
                 authority=str(tenders_table.employer_name),
                 value=int(self._convert_word_currency_to_number(str(scraped_tender_table.value))),
@@ -189,14 +192,32 @@ class TenderFilterService:
 
     def _get_tenders_by_flag(self, db: Session, flag_name: str) -> list[Tender]:
         """Helper to get all tenders where a specific boolean flag is set."""
-        tender_repo = TenderRepository(db)
         scraped_tender_repo = TenderIQRepository(db)
         
-        tenders_with_flag = tender_repo.get_tenders_by_flag(flag_name)
-        tender_ids = [t.id for t in tenders_with_flag]
+        # Use the new repository method that properly joins tables
+        # Returns list of tuples: (ScrapedTender, Tender)
+        tender_pairs = scraped_tender_repo.get_scraped_tenders_by_flag(flag_name, flag_value=True)
         
-        scraped_tenders = scraped_tender_repo.get_tenders_by_ids(tender_ids)
-        return [Tender.model_validate(t) for t in scraped_tenders]
+        result = []
+        for scraped_tender, tender_record in tender_pairs:
+            # Convert ScrapedTender to dict
+            tender_dict = Tender.model_validate(scraped_tender).model_dump()
+            
+            # Add the flags from the Tender table
+            if tender_record:
+                tender_dict['is_favorite'] = tender_record.is_favorite
+                tender_dict['is_wishlisted'] = tender_record.is_wishlisted
+                tender_dict['is_archived'] = tender_record.is_archived
+            else:
+                # Default to False if no tender record exists (shouldn't happen with inner join)
+                tender_dict['is_favorite'] = False
+                tender_dict['is_wishlisted'] = False
+                tender_dict['is_archived'] = False
+            
+            # Re-validate with the updated dict
+            result.append(Tender.model_validate(tender_dict))
+        
+        return result
 
     def get_wishlisted_tenders(self, db: Session) -> list[Tender]:
         """Gets all tenders that are wishlisted."""

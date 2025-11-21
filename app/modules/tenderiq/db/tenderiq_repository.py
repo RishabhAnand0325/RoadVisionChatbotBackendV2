@@ -11,7 +11,7 @@ making the modules properly decoupled and independently testable.
 from typing import List, Optional
 from uuid import UUID
 from datetime import datetime, timedelta
-from sqlalchemy import Row, Tuple
+from sqlalchemy import Row, Tuple, and_
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.schema import Column
 
@@ -32,16 +32,109 @@ class TenderIQRepository:
     def get_wishlisted_tenders(self) -> List[Row[tuple[Tender, ScrapedTender]]]:
         """
         Get all tenders that have been marked as wishlisted.
+        Joins by ID to ensure proper matching.
         """
         return self.db.query(Tender, ScrapedTender).join(
-            ScrapedTender, Tender.tender_ref_number == ScrapedTender.tdr
-        ).filter(Tender.is_wishlisted).all()
+            ScrapedTender, Tender.id == ScrapedTender.id
+        ).filter(Tender.is_wishlisted == True).all()
+
+    def get_scraped_tenders_by_flag(self, flag_name: str, flag_value: bool = True) -> list[tuple[ScrapedTender, Optional[Tender]]]:
+        """
+        Get ScrapedTender objects filtered by a flag in the Tender table.
+        
+        This method properly joins scraped_tenders with tenders table,
+        allowing filtering by flags (is_wishlisted, is_favorite, is_archived).
+        
+        Returns both ScrapedTender and Tender objects so the caller can
+        access both scraped data and action flags.
+        
+        Args:
+            flag_name: Name of the boolean flag (e.g., 'is_wishlisted', 'is_favorite', 'is_archived')
+            flag_value: Value to filter by (default: True)
+            
+        Returns:
+            List of tuples containing (ScrapedTender, Tender) objects
+        """
+        if not hasattr(Tender, flag_name):
+            raise ValueError(f"'{flag_name}' is not a valid attribute of Tender model.")
+        
+        # Join ScrapedTender with Tender table and filter where the flag is True
+        query = (
+            self.db.query(ScrapedTender, Tender)
+            .join(
+                Tender,
+                and_(
+                    ScrapedTender.id == Tender.id,
+                    getattr(Tender, flag_name) == flag_value
+                ),
+                isouter=False  # Inner join - only get tenders with the flag set
+            )
+            .options(
+                joinedload(ScrapedTender.files),
+                joinedload(ScrapedTender.query)
+            )
+        )
+        
+        return query.all()
+
+    def enrich_scraped_tenders_with_flags(self, scraped_tenders: list[ScrapedTender]) -> list[ScrapedTender]:
+        """
+        Enrich ScrapedTender objects with action flags from the Tender table.
+        
+        For each ScrapedTender, looks up the corresponding Tender record and
+        adds is_wishlisted, is_favorite, is_archived attributes.
+        
+        Args:
+            scraped_tenders: List of ScrapedTender objects to enrich
+            
+        Returns:
+            The same list with added flag attributes
+        """
+        if not scraped_tenders:
+            return []
+        
+        # Get all tender IDs
+        tender_ids = [t.id for t in scraped_tenders]
+        
+        # Fetch all corresponding Tender records in one query
+        tender_records = (
+            self.db.query(Tender)
+            .filter(Tender.id.in_(tender_ids))
+            .all()
+        )
+        
+        # Create a lookup dictionary for quick access
+        tender_flags_map = {
+            t.id: {
+                'is_wishlisted': t.is_wishlisted,
+                'is_favorite': t.is_favorite,
+                'is_archived': t.is_archived
+            }
+            for t in tender_records
+        }
+        
+        # Add flags to each ScrapedTender object
+        for scraped_tender in scraped_tenders:
+            flags = tender_flags_map.get(scraped_tender.id, {
+                'is_wishlisted': False,
+                'is_favorite': False,
+                'is_archived': False
+            })
+            
+            # Set attributes on the SQLAlchemy object
+            # These will be picked up by model_validate
+            scraped_tender.is_wishlisted = flags['is_wishlisted']
+            scraped_tender.is_favorite = flags['is_favorite']
+            scraped_tender.is_archived = flags['is_archived']
+        
+        return scraped_tenders
 
     def get_tender_by_id(self, tender_id: UUID) -> Optional[ScrapedTender]:
         """
         Get a single tender by its UUID, with all relationships loaded.
+        Also enriches with action flags from the Tender table.
         """
-        return (
+        tender = (
             self.db.query(ScrapedTender)
             .filter(ScrapedTender.id == tender_id)
             .options(
@@ -50,14 +143,21 @@ class TenderIQRepository:
             )
             .first()
         )
+        
+        if tender:
+            # Enrich with flags
+            self.enrich_scraped_tenders_with_flags([tender])
+        
+        return tender
 
     def get_tenders_by_ids(self, tender_ids: list[Column[UUID]]) -> list[ScrapedTender]:
         """
         Get a list of tenders by their UUIDs, with all relationships loaded.
+        Also enriches with action flags from the Tender table.
         """
         if not tender_ids:
             return []
-        return (
+        tenders = (
             self.db.query(ScrapedTender)
             .filter(ScrapedTender.id.in_(tender_ids))
             .options(
@@ -66,6 +166,9 @@ class TenderIQRepository:
             )
             .all()
         )
+        
+        # Enrich with flags
+        return self.enrich_scraped_tenders_with_flags(tenders)
 
     def get_tenders_by_ids_tenderiq(self, tender_ids: list[Column[UUID]]) -> list[Tender]:
         """

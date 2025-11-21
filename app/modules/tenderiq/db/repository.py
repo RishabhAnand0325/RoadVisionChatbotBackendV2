@@ -19,27 +19,75 @@ class TenderRepository:
         """
         Gets a Tender by its UUID. If it doesn't exist, it creates one
         based on the corresponding ScrapedTender data.
+        
+        Note: We first try to find by ID (scraped_tender.id), then by tender_ref_number.
+        If found by tender_ref_number with mismatched ID, we update the ID to match.
+        This handles legacy data where IDs might not have been synced.
         """
-        tender = self.db.query(Tender).filter(Tender.tender_ref_number == scraped_tender.tender_id_str).first()
+        # First try to find by ID (the correct way)
+        tender = self.db.query(Tender).filter(Tender.id == scraped_tender.id).first()
+        
         if not tender:
-            # Map fields from ScrapedTender to Tender
-            tender = Tender(
-                id=scraped_tender.id,
-                tender_ref_number=scraped_tender.tender_id_str,
-                tender_title=scraped_tender.tender_name,
-                description=scraped_tender.summary,
-                employer_name=scraped_tender.company_name,
-                issuing_authority=scraped_tender.tendering_authority,
-                state=scraped_tender.state,
-                location=scraped_tender.city,
-                category=scraped_tender.query.query_name if scraped_tender.query else None,
-                estimated_cost=(scraped_tender.tender_value),
-                submission_deadline=self._parse_date(scraped_tender.last_date_of_bid_submission),
-                portal_url=scraped_tender.information_source,
-            )
-            self.db.add(tender)
+            # Try to find by tender_ref_number (for legacy data)
+            tender = self.db.query(Tender).filter(Tender.tender_ref_number == scraped_tender.tender_id_str).first()
+            
+            if tender:
+                # Found by tender_ref_number but ID doesn't match
+                # Update the ID to match scraped_tender.id
+                if tender.id != scraped_tender.id:
+                    # Delete the old record and create a new one with the correct ID
+                    # (Can't update primary key, so we need to recreate)
+                    old_wishlist = tender.is_wishlisted
+                    old_favorite = tender.is_favorite
+                    old_archived = tender.is_archived
+                    old_status = tender.status
+                    old_review_status = tender.review_status
+                    
+                    self.db.delete(tender)
+                    self.db.flush()  # Flush to ensure deletion happens before creation
+                    
+                    tender = Tender(
+                        id=scraped_tender.id,
+                        tender_ref_number=scraped_tender.tender_id_str,
+                        tender_title=scraped_tender.tender_name,
+                        description=scraped_tender.summary,
+                        employer_name=scraped_tender.company_name,
+                        issuing_authority=scraped_tender.tendering_authority,
+                        state=scraped_tender.state,
+                        location=scraped_tender.city,
+                        category=scraped_tender.query.query_name if scraped_tender.query else None,
+                        estimated_cost=(scraped_tender.tender_value),
+                        submission_deadline=self._parse_date(scraped_tender.last_date_of_bid_submission),
+                        portal_url=scraped_tender.information_source,
+                        # Preserve the old flags
+                        is_wishlisted=old_wishlist,
+                        is_favorite=old_favorite,
+                        is_archived=old_archived,
+                        status=old_status,
+                        review_status=old_review_status,
+                    )
+                    self.db.add(tender)
+            else:
+                # Doesn't exist at all, create new
+                tender = Tender(
+                    id=scraped_tender.id,
+                    tender_ref_number=scraped_tender.tender_id_str,
+                    tender_title=scraped_tender.tender_name,
+                    description=scraped_tender.summary,
+                    employer_name=scraped_tender.company_name,
+                    issuing_authority=scraped_tender.tendering_authority,
+                    state=scraped_tender.state,
+                    location=scraped_tender.city,
+                    category=scraped_tender.query.query_name if scraped_tender.query else None,
+                    estimated_cost=(scraped_tender.tender_value),
+                    submission_deadline=self._parse_date(scraped_tender.last_date_of_bid_submission),
+                    portal_url=scraped_tender.information_source,
+                )
+                self.db.add(tender)
+            
             self.db.commit()
             self.db.refresh(tender)
+        
         return tender
 
     def update(self, tender: Tender, updates: dict) -> Tender:
