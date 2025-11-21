@@ -191,7 +191,7 @@ class TenderAnalysisRead(BaseModel):
     # Timestamps
     created_at: datetime
     updated_at: datetime
-    analysis_started_at: datetime
+    analysis_started_at: Optional[datetime] = None
     analysis_completed_at: Optional[datetime] = None
     
     # Analysis Results - JSON columns (untyped to avoid circular imports)

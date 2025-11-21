@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from sse_starlette.sse import EventSourceResponse
 from app.modules.tenderiq.models.pydantic_models import DailyTendersResponse, ScrapedDate, ScrapedDatesResponse, Tender, ScrapedTenderQuery
 from app.modules.tenderiq.repositories import repository as tenderiq_repo
+from app.modules.tenderiq.db.tenderiq_repository import TenderIQRepository
 
 def get_daily_tenders_limited(db: Session, start: int, end: int):
     scrape_runs = tenderiq_repo.get_scrape_runs(db)
@@ -90,7 +91,10 @@ def get_daily_tenders_sse(db: Session, start: Optional[int] = 0, end: Optional[i
             if len(tenders) == 0:
                 break
 
-            pydantic_tenders = [Tender.model_validate(t).model_dump(mode='json') for t in tenders]
+            # Enrich tenders with action flags before converting to Pydantic
+            tenderiq_repository = TenderIQRepository(db)
+            enriched_tenders = tenderiq_repository.enrich_scraped_tenders_with_flags(tenders)
+            pydantic_tenders = [Tender.model_validate(t).model_dump(mode='json') for t in enriched_tenders]
             yield {
                 'event': 'batch',
                 'data': json.dumps({

@@ -95,6 +95,7 @@ class TenderRepository:
         for key, value in updates.items():
             setattr(tender, key, value)
         self.db.commit()
+        self.db.flush()  # Ensure changes are flushed to DB immediately
         self.db.refresh(tender)
         return tender
 

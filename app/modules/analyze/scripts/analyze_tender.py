@@ -233,6 +233,12 @@ def analyze_tender(db: Session, tdr: str):
 
         logger.info(f"[{tdr}] Found {len(files)} files to process")
 
+        # Calculate progress increments based on file count
+        # Progress breakdown: 0-20% setup, 20-70% file processing, 70-100% analysis
+        total_files = len(files)
+        file_progress_range = 50  # 50% of total progress for file processing (20% to 70%)
+        file_progress_increment = file_progress_range / total_files if total_files > 0 else 0
+
         # Create temporary directory for downloads
         # Using uuid4() ensures each run has a unique directory (prevents collisions)
         temp_dir = Path(f"/tmp/tender_analysis_{tdr}_{uuid4()}")
@@ -277,6 +283,8 @@ def analyze_tender(db: Session, tdr: str):
         # Collect all chunks from all processed files
         all_tender_chunks = []
         total_chunks_created = 0
+        files_processed = 0
+        base_progress = 20  # Start file processing at 20%
 
         # Process each downloaded file with comprehensive DocumentService
         # Supports PDF, Excel, HTML, and archive files
@@ -307,6 +315,13 @@ def analyze_tender(db: Session, tdr: str):
                     logger.info(f"[{tdr}] File stats: {stats}")
                 else:
                     logger.warning(f"[{tdr}] No chunks extracted from {file_path.name}")
+                
+                # Update progress after each file
+                files_processed += 1
+                current_progress = int(base_progress + (files_processed * file_progress_increment))
+                analysis.progress = min(current_progress, 70)  # Cap at 70%
+                analysis.status_message = f"Processing files: {files_processed}/{total_files} ({total_chunks_created} chunks)"
+                db.commit()
 
             except ValueError as e:
                 logger.warning(f"[{tdr}] Skipping unsupported file: {file_path.name} - {e}")
@@ -323,7 +338,7 @@ def analyze_tender(db: Session, tdr: str):
             return
 
         logger.info(f"[{tdr}] Successfully extracted {total_chunks_created} chunks from documents")
-        analysis.progress = 40
+        analysis.progress = 75
         analysis.status_message = f"Extracted {total_chunks_created} chunks, storing in vector database"
         db.commit()
 
@@ -350,8 +365,8 @@ def analyze_tender(db: Session, tdr: str):
                 chunks_added = vector_store.add_tender_chunks(tender_collection, all_tender_chunks)
                 logger.info(f"[{tdr}] Successfully added {chunks_added} chunks to vector database")
 
-                analysis.progress = 60
-                analysis.status_message = f"Stored {chunks_added} chunks in vector database"
+                analysis.progress = 80
+                analysis.status_message = f"Stored {chunks_added} chunks, generating analysis"
                 db.commit()
 
             except Exception as e:
