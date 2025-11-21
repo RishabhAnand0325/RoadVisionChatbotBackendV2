@@ -154,8 +154,42 @@ Return valid JSON array with DETAILED requirements (remember: MINIMUM 100 words 
         elif '```' in response_text:
             response_text = response_text.split('```')[1].split('```')[0].strip()
         
-        # Parse LLM response
-        qualification_criteria = json.loads(response_text)
+        # Parse LLM response with better error handling
+        try:
+            qualification_criteria = json.loads(response_text)
+        except json.JSONDecodeError as e:
+            # Try to fix common JSON issues
+            logger.warning(f"JSON decode error, attempting to fix: {e}")
+            
+            # Fix unterminated strings by finding the last complete object
+            try:
+                # Try to extract valid JSON array portion
+                if response_text.strip().startswith('['):
+                    # Find the last complete JSON object
+                    import re
+                    # Try to find the last valid closing bracket
+                    depth = 0
+                    last_valid_pos = 0
+                    for i, char in enumerate(response_text):
+                        if char == '[' or char == '{':
+                            depth += 1
+                        elif char == ']' or char == '}':
+                            depth -= 1
+                            if depth == 0:
+                                last_valid_pos = i + 1
+                                break
+                    
+                    if last_valid_pos > 0:
+                        truncated = response_text[:last_valid_pos]
+                        qualification_criteria = json.loads(truncated)
+                        logger.info(f"Successfully recovered JSON by truncating at position {last_valid_pos}")
+                    else:
+                        raise
+                else:
+                    raise
+            except Exception:
+                logger.error(f"Could not repair JSON. Response preview: {response_text[:500]}")
+                qualification_criteria = []  # Return empty list on failure
         
         # AGGRESSIVE deduplication and cleanup
         seen_types = {}

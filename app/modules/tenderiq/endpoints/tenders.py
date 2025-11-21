@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from typing import Optional
 from uuid import UUID
+import logging
 
 from app.db.database import get_db_session
 from app.modules.auth.services.auth_service import get_current_active_user
@@ -16,6 +17,7 @@ from app.modules.tenderiq.models.pydantic_models import (
     Tender,
     FilteredTendersResponse,
     TenderActionRequest,
+    TenderActionType,
 )
 from app.modules.tenderiq.services import tender_service
 from app.modules.tenderiq.services.tender_filter_service import TenderFilterService
@@ -23,6 +25,7 @@ from app.modules.tenderiq.services.tender_action_service import TenderActionServ
 from sse_starlette.sse import EventSourceResponse
 from app.modules.tenderiq.services import tender_service_sse
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -191,14 +194,71 @@ def perform_tender_action(
     """
     try:
         service = TenderActionService(db)
-        service.perform_action(tender_id, current_user.id, request)
-        return {"message": "Action performed successfully", "tender_id": str(tender_id)}
+        updated_tender, tender_ref = service.perform_action(tender_id, current_user.id, request)
+        
+        response = {
+            "message": "Action performed successfully",
+            "tender_id": str(tender_id),
+            "is_wishlisted": getattr(updated_tender, 'is_wishlisted', False),
+            "is_favorite": getattr(updated_tender, 'is_favorite', False),
+            "is_archived": getattr(updated_tender, 'is_archived', False),
+        }
+        
+        # If tender was just wishlisted, include analysis queue info
+        if request.action == TenderActionType.TOGGLE_WISHLIST and getattr(updated_tender, 'is_wishlisted', False):
+            try:
+                from app.modules.analyze.services.analysis_queue_service import AnalysisQueueService
+                from app.modules.analyze.db.schema import TenderAnalysis, AnalysisStatusEnum
+                
+                if tender_ref:
+                    # First check if analysis already completed
+                    existing_analysis = db.query(TenderAnalysis).filter(
+                        TenderAnalysis.tender_id == tender_ref
+                    ).first()
+                    
+                    if existing_analysis and existing_analysis.status == AnalysisStatusEnum.completed:
+                        # Analysis already exists and completed
+                        response["analysis_queued"] = False
+                        response["analysis_completed"] = True
+                        response["message"] = "Added to wishlist. Analysis already completed."
+                    else:
+                        # Check queue status
+                        queue_status = AnalysisQueueService.get_queue_status(db)
+                        position = AnalysisQueueService.get_tender_queue_position(db, tender_ref)
+                        
+                        response["analysis_queued"] = position is not None
+                        response["analysis_completed"] = False
+                        response["queue_position"] = position
+                        response["queue_total"] = queue_status.get("queue_length", 0)
+                        response["has_active_analysis"] = queue_status.get("has_active", False)
+                        
+                        # Determine message for user
+                        if queue_status.get("has_active"):
+                            if position == 1:
+                                response["message"] = "Added to wishlist. Analysis will start after current one completes (~5 min)."
+                            elif position and position > 1:
+                                response["message"] = f"Added to wishlist. In analysis queue at position {position}."
+                            else:
+                                response["message"] = "Added to wishlist. Analysis queued."
+                        else:
+                            response["message"] = "Added to wishlist. Analysis starting now (~5 min)."
+                else:
+                    response["analysis_queued"] = False
+                    response["analysis_completed"] = False
+            except Exception as e:
+                # Don't fail the action if we can't get queue status
+                logger.warning(f"Failed to get analysis queue status: {e}", exc_info=True)
+                response["analysis_queued"] = False
+                response["analysis_completed"] = False
+        
+        return response
     except HTTPException as e:
         raise e
     except Exception as e:
+        logger.error(f"Error performing tender action: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"An unexpected error occurred: {e}",
+            detail=f"An unexpected error occurred: {str(e)}",
         )
 
 

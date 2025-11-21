@@ -28,7 +28,10 @@ def get_rfp_sections(db: Session, analysis_id: UUID) -> RFPSectionsResponseSchem
                 summary=section.summary or "",
                 key_requirements=section.key_requirements or [],
                 compliance_issues=[str(item) for item in section.compliance_issues] if section.compliance_issues else [],
-                page_references=section.page_references or []
+                page_references=[
+                    int(ref) if isinstance(ref, (int, float)) or (isinstance(ref, str) and ref.isdigit()) else 0
+                    for ref in (section.page_references or [])
+                ] if section.page_references else []
             ) for section in analysis_rfp_sections
         ]
     )
