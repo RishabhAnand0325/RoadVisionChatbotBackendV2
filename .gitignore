@@ -1,4 +1,5 @@
 .venv/
+model_cache/
 .aider*
 .env
 __pycache__/

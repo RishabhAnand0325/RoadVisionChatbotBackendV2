@@ -979,7 +979,7 @@ def _generate_rfp_sections(context: str, analysis_id, db: Session, tdr: str) -> 
            - summary: Brief summary of what this section covers
            - key_requirements: List of important requirements/criteria
            - compliance_issues: List of potential compliance concerns or unclear items
-           - page_references: List of page numbers where this section appears (estimate if not clear)
+           - page_references: Array of INTEGER page numbers where this section appears (e.g., [1, 2, 3]). MUST be integers only, not strings.
 
         CRITICAL: section_number must be SHORT (under 100 chars) - use numbers, letters, or brief codes.
         The descriptive text should go in section_title, NOT section_number.
@@ -988,7 +988,7 @@ def _generate_rfp_sections(context: str, analysis_id, db: Session, tdr: str) -> 
         [
           {{
             "section_number": "1.1",
-            "section_title": "Eligibility Criteria", 
+            "section_title": "Eligibility Criteria",
             "summary": "This section outlines the minimum eligibility requirements...",
             "key_requirements": ["Minimum turnover Rs. 50 Cr in last 3 years", "Experience in highway projects"],
             "compliance_issues": ["Turnover calculation method unclear", "Similar work definition ambiguous"],
@@ -996,6 +996,7 @@ def _generate_rfp_sections(context: str, analysis_id, db: Session, tdr: str) -> 
           }}
         ]
 
+        CRITICAL: page_references MUST be an array of integers like [1, 2, 3], NOT strings like ["1", "2"] or ["First Line of Document"].
         Focus on creating comprehensive sections that cover all important aspects.
         """
 

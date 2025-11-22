@@ -26,8 +26,15 @@ from app.modules.tenderiq.db.schema import Tender
 class TenderIQRepository:
     """Repository for TenderIQ-specific data access operations"""
 
+    # List of tender names to hide from frontend
+    HIDDEN_TENDER_NAMES = ['Military Engineer Services']
+
     def __init__(self, db: Session):
         self.db = db
+
+    def _should_hide_tender(self, tender: ScrapedTender) -> bool:
+        """Check if a tender should be hidden from frontend."""
+        return tender.tender_name in self.HIDDEN_TENDER_NAMES
 
     def get_wishlisted_tenders(self) -> List[Row[tuple[Tender, ScrapedTender]]]:
         """

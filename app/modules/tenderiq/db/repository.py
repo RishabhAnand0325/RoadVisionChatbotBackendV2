@@ -99,18 +99,27 @@ class TenderRepository:
         self.db.refresh(tender)
         return tender
 
-    def log_action(self, tender_id: UUID, user_id: UUID, action: TenderActionEnum, notes: Optional[str] = None) -> TenderActionHistory:
-        """Logs a user action on a tender."""
-        history_log = TenderActionHistory(
-            tender_id=tender_id,
-            user_id=user_id,
-            action=action,
-            notes=notes,
-        )
-        self.db.add(history_log)
-        self.db.commit()
-        self.db.refresh(history_log)
-        return history_log
+    def log_action(self, tender_id: UUID, user_id: UUID, action: TenderActionEnum, notes: Optional[str] = None) -> Optional[TenderActionHistory]:
+        """
+        Logs a user action on a tender.
+        Returns None if logging fails (e.g., user doesn't exist).
+        """
+        try:
+            history_log = TenderActionHistory(
+                tender_id=tender_id,
+                user_id=user_id,
+                action=action,
+                notes=notes,
+            )
+            self.db.add(history_log)
+            self.db.commit()
+            self.db.refresh(history_log)
+            return history_log
+        except Exception as e:
+            # Rollback the failed logging attempt
+            self.db.rollback()
+            # Re-raise to let the caller handle it
+            raise
     
     def get_tenders_by_flag(self, flag_name: str, flag_value: bool = True) -> list[Tender]:
         """

@@ -641,9 +641,15 @@ class TenderFilterService:
         Returns:
             Filtered list of ScrapedTender objects
         """
+        # Hidden tender names that should not be displayed
+        HIDDEN_TENDER_NAMES = ['Military Engineer Services']
+
         filtered = []
 
         for tender in tenders:
+            # Skip hidden tenders
+            if tender.tender_name in HIDDEN_TENDER_NAMES:
+                continue
             # Location filter
             if location and tender.city.lower() != location.lower():
                 continue
