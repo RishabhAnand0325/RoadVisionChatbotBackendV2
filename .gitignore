@@ -18,3 +18,4 @@ token.json
 *.sql
 __pycache__/
 *.pyc
+model_cache

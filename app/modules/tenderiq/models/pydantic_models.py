@@ -56,6 +56,11 @@ class Tender(BaseModel):
     information_source: Optional[str] = None
     files: list[TenderFile]
     dms_folder_id: Optional[UUID] = None
+    
+    # Action flags - These are from the tenders table, not scraped_tenders
+    is_favorite: Optional[bool] = False
+    is_wishlisted: Optional[bool] = False
+    is_archived: Optional[bool] = False
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -154,6 +159,14 @@ class ScrapedTenderRead(BaseModel):
 
     # TenderDetailOtherDetail
     information_source: str
+    # Extra fields merged from Tender table for wishlist/export
+    length_km: Optional[float] = None
+    per_km_cost: Optional[float] = None
+    span_length: Optional[float] = None
+    road_work_amount: Optional[float] = None
+    structure_work_amount: Optional[float] = None
+    remarks: Optional[str] = None
+    current_status: Optional[str] = None
     class Config:
         from_attributes = True
 
@@ -178,7 +191,7 @@ class TenderAnalysisRead(BaseModel):
     # Timestamps
     created_at: datetime
     updated_at: datetime
-    analysis_started_at: datetime
+    analysis_started_at: Optional[datetime] = None
     analysis_completed_at: Optional[datetime] = None
     
     # Analysis Results - JSON columns (untyped to avoid circular imports)
