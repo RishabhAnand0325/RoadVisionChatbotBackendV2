@@ -59,6 +59,7 @@ class Settings:
     # Environment
     ENV: str = "development"
 
+
     def __init__(self):
         self._load_and_validate_env()
 
@@ -115,6 +116,7 @@ class Settings:
         self.USE_LANGCHAIN_RAG = os.getenv("USE_LANGCHAIN_RAG", "false").lower() == "true"
         if self.USE_LANGCHAIN_RAG:
             print("⚠️  LANGCHAIN_RAG: enabled (Phase 1+ migration in progress)")
+
 
 # Singleton instance
 settings = Settings()
