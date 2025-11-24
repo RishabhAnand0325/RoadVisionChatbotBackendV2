@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+
 @router.get(
     "/queue/status",
     summary="Get Analysis Queue Status",
@@ -134,20 +135,20 @@ def trigger_analysis(
         db.commit()
         db.refresh(new_analysis)
         
+
         logger.info(f"Created pending analysis for tender {tender_id}")
-        
-        # Start analysis in background thread
+
         def run_analysis_in_background(tender_id: str):
             """Run analysis in a separate thread with its own DB session"""
             thread_db = SessionLocal()
             try:
                 from app.modules.analyze.scripts.analyze_tender import analyze_tender
-                analyze_tender(tender_id, thread_db)
+                analyze_tender(thread_db, tender_id)
             except Exception as e:
                 logger.error(f"Background analysis failed for {tender_id}: {e}", exc_info=True)
             finally:
                 thread_db.close()
-        
+
         # Start background thread
         analysis_thread = threading.Thread(
             target=run_analysis_in_background,

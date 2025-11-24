@@ -9,6 +9,7 @@ from typing import List, Optional
 from uuid import uuid4
 from functools import wraps
 import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 
 import requests
 from sqlalchemy.orm import Session, joinedload
@@ -35,9 +36,15 @@ logger = logging.getLogger(__name__)
 MAX_CONTEXT_CHARS = 50000  # Max characters to send to LLM in context
 
 # Request parameters
-REQUEST_TIMEOUT = 30  # Seconds to wait for HTTP requests
-MAX_RETRIES = 3  # Number of times to retry failed operations
-RETRY_DELAY = 1.0  # Base delay in seconds between retries (exponential backoff)
+REQUEST_TIMEOUT = 60  # Seconds to wait for HTTP requests (allows slow downloads to start)
+MAX_RETRIES = 0  # Number of times to retry failed operations (0 = single attempt, no retries for speed)
+RETRY_DELAY = 2.0  # Base delay in seconds between retries (exponential backoff)
+MAX_DOWNLOAD_TIME_PER_FILE = 60  # Maximum time in seconds per file (1 minute - balanced for speed vs success)
+MIN_FILES_REQUIRED = 1  # Minimum files needed to proceed with analysis
+MAX_FILES_TO_DOWNLOAD = 10  # Download at most this many files (stop after success to save time)
+
+# Document processing parameters
+MAX_PROCESSING_TIME_PER_FILE = 120  # Maximum time in seconds to process each document (2 minutes - handles image-heavy PDFs)
 
 
 # ============================================================================
@@ -106,29 +113,105 @@ def retry_with_backoff(max_attempts: int = MAX_RETRIES, base_delay: float = RETR
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
+            # Handle edge case where max_attempts is 0 or less
+            attempts = max(1, max_attempts)
             last_exception = None
 
-            for attempt in range(max_attempts):
+            for attempt in range(attempts):
                 try:
                     return func(*args, **kwargs)
                 except Exception as e:
                     last_exception = e
-                    if attempt < max_attempts - 1:
+                    if attempt < attempts - 1:
                         # Calculate exponential backoff: delay * 2^attempt
                         delay = base_delay * (2 ** attempt)
                         logger.warning(
-                            f"{func.__name__} failed (attempt {attempt + 1}/{max_attempts}): {e}. "
+                            f"{func.__name__} failed (attempt {attempt + 1}/{attempts}): {e}. "
                             f"Retrying in {delay}s..."
                         )
                         time.sleep(delay)
                     else:
-                        logger.error(f"{func.__name__} failed after {max_attempts} attempts: {e}")
+                        logger.error(f"{func.__name__} failed after {attempts} attempts: {e}")
 
             # If all retries failed, raise the last exception
-            raise last_exception
+            if last_exception:
+                raise last_exception
 
         return wrapper
     return decorator
+
+
+# ============================================================================
+# TIMEOUT EXCEPTION
+# For handling timeouts during document downloads
+# ============================================================================
+
+class TimeoutException(Exception):
+    """Exception raised when an operation times out."""
+    pass
+
+
+def download_with_timeout(file: 'ScrapedTenderFile', temp_dir: Path, timeout_seconds: int) -> Path:
+    """
+    Download a file with a timeout using ThreadPoolExecutor.
+
+    This works in any thread (unlike signal-based timeouts which only work in main thread).
+
+    Args:
+        file: ScrapedTenderFile object to download
+        temp_dir: Directory to save the file
+        timeout_seconds: Maximum time allowed for download
+
+    Returns:
+        Path to downloaded file
+
+    Raises:
+        TimeoutException: If download takes longer than timeout_seconds
+        Exception: Any other download errors
+    """
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(_download_single_file_with_retry, file, temp_dir)
+        try:
+            return future.result(timeout=timeout_seconds)
+        except FutureTimeoutError:
+            raise TimeoutException(f"Download timed out after {timeout_seconds} seconds")
+
+
+def process_document_with_timeout(document_service, job_id: str, file_path: str, doc_id: str,
+                                   filename: str, timeout_seconds: int):
+    """
+    Process a document with a timeout using ThreadPoolExecutor.
+
+    This helps skip documents that hang during processing (e.g., image-heavy PDFs with LlamaParse).
+
+    Args:
+        document_service: DocumentService instance
+        job_id: Job ID for processing
+        file_path: Path to the file
+        doc_id: Document ID
+        filename: Name of the file
+        timeout_seconds: Maximum time allowed for processing
+
+    Returns:
+        Tuple of (chunks, stats)
+
+    Raises:
+        TimeoutException: If processing takes longer than timeout_seconds
+        Exception: Any other processing errors
+    """
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(
+            document_service.process_document,
+            job_id=job_id,
+            file_path=file_path,
+            doc_id=doc_id,
+            filename=filename,
+            save_json=False
+        )
+        try:
+            return future.result(timeout=timeout_seconds)
+        except FutureTimeoutError:
+            raise TimeoutException(f"Document processing timed out after {timeout_seconds} seconds (likely image-heavy document)")
 
 
 # --- Main Analysis Function ---
@@ -245,17 +328,24 @@ def analyze_tender(db: Session, tdr: str):
         temp_dir.mkdir(parents=True, exist_ok=True)
         logger.info(f"[{tdr}] Created temp directory: {temp_dir}")
 
-        # Download all files with retry logic for transient failures
+        # Download all files with retry logic and timeout for slow files
         downloaded_files = _download_files_with_retry(files, temp_dir, tdr)
 
         if not downloaded_files:
             logger.error(f"[{tdr}] Failed to download any files")
-            analysis.error_message = "Failed to download any files from tender URLs"
+            analysis.error_message = "Failed to download any files from tender URLs (all files were too slow or failed)"
             analysis.status = AnalysisStatusEnum.failed
             db.commit()
             return
 
-        logger.info(f"[{tdr}] Successfully downloaded {len(downloaded_files)} files")
+        # Update status message to reflect partial downloads if any files were skipped
+        files_skipped = len(files) - len(downloaded_files)
+        if files_skipped > 0:
+            logger.info(f"[{tdr}] Successfully downloaded {len(downloaded_files)}/{len(files)} files ({files_skipped} skipped due to slow download or errors)")
+            analysis.status_message = f"Downloaded {len(downloaded_files)}/{len(files)} files, extracting content"
+            db.commit()
+        else:
+            logger.info(f"[{tdr}] Successfully downloaded all {len(downloaded_files)} files")
 
         # ====================================================================
         # STEP 3: PROCESS PDFS & EXTRACT TEXT WITH CHUNKING
@@ -289,33 +379,36 @@ def analyze_tender(db: Session, tdr: str):
         # Process each downloaded file with comprehensive DocumentService
         # Supports PDF, Excel, HTML, and archive files
         document_service = DocumentService()
-        
-        for file_path in downloaded_files:
+        skipped_processing = 0
+
+        for idx, file_path in enumerate(downloaded_files, 1):
             try:
                 file_suffix = file_path.suffix.lower()
-                logger.info(f"[{tdr}] Processing file with DocumentService: {file_path.name} (format: {file_suffix})")
+                logger.info(f"[{tdr}] Processing file {idx}/{len(downloaded_files)}: {file_path.name} (format: {file_suffix})")
 
-                # Use DocumentService which supports PDF, Excel, HTML, and archives
+                # Use DocumentService with timeout to skip image-heavy or problematic documents
                 import uuid as uuid_module
                 doc_id = str(uuid_module.uuid4())
                 job_id = f"analyze_tender_{tdr}_{uuid_module.uuid4()}"
 
-                chunks, stats = document_service.process_document(
+                # Process with timeout to handle image-heavy PDFs that hang LlamaParse
+                chunks, stats = process_document_with_timeout(
+                    document_service=document_service,
                     job_id=job_id,
                     file_path=str(file_path),
                     doc_id=doc_id,
                     filename=file_path.name,
-                    save_json=False  # Don't save JSON files during analysis
+                    timeout_seconds=MAX_PROCESSING_TIME_PER_FILE
                 )
 
                 if chunks:
                     all_tender_chunks.extend(chunks)
                     total_chunks_created += len(chunks)
-                    logger.info(f"[{tdr}] Processed {file_path.name}: {len(chunks)} chunks created (type: {file_suffix})")
+                    logger.info(f"[{tdr}] ✓ Processed {file_path.name}: {len(chunks)} chunks created (type: {file_suffix})")
                     logger.info(f"[{tdr}] File stats: {stats}")
                 else:
                     logger.warning(f"[{tdr}] No chunks extracted from {file_path.name}")
-                
+
                 # Update progress after each file
                 files_processed += 1
                 current_progress = int(base_progress + (files_processed * file_progress_increment))
@@ -323,11 +416,20 @@ def analyze_tender(db: Session, tdr: str):
                 analysis.status_message = f"Processing files: {files_processed}/{total_files} ({total_chunks_created} chunks)"
                 db.commit()
 
+            except TimeoutException as e:
+                # Document took too long to process (likely image-heavy) - skip it
+                skipped_processing += 1
+                logger.warning(f"[{tdr}] ⏭ Skipping slow document {file_path.name}: {e}")
             except ValueError as e:
+                skipped_processing += 1
                 logger.warning(f"[{tdr}] Skipping unsupported file: {file_path.name} - {e}")
             except Exception as e:
-                logger.error(f"[{tdr}] Failed to process {file_path.name}: {e}", exc_info=True)
+                skipped_processing += 1
+                logger.error(f"[{tdr}] ✗ Failed to process {file_path.name}: {e}", exc_info=True)
                 # Continue with other files - don't fail entire analysis
+
+        if skipped_processing > 0:
+            logger.info(f"[{tdr}] Processed {files_processed}/{len(downloaded_files)} files ({skipped_processing} skipped during processing)")
 
         # Validate that we extracted meaningful chunks
         if not all_tender_chunks:
@@ -545,9 +647,10 @@ def _download_files_with_retry(
     files: List[ScrapedTenderFile], temp_dir: Path, tdr: str
 ) -> List[Path]:
     """
-    Download files from URLs with retry logic for transient failures.
+    Download files from URLs with retry logic and timeout for slow files.
 
     This function implements robust file downloading with:
+    - Timeout for each file to skip slow/hanging downloads
     - Retry logic for transient network failures
     - Graceful handling of partial failures (if 1 file fails, others proceed)
     - Logging of each download attempt
@@ -561,17 +664,34 @@ def _download_files_with_retry(
         List of successfully downloaded file paths (may be partial list if some failed)
     """
     downloaded_files = []
+    skipped_count = 0
+    total_files = len(files)
 
-    for file in files:
+    for idx, file in enumerate(files, 1):
+        # Early stopping: if we have enough successful downloads, skip remaining files
+        if len(downloaded_files) >= MAX_FILES_TO_DOWNLOAD:
+            remaining = total_files - idx + 1
+            logger.info(f"[{tdr}] ✅ Successfully downloaded {len(downloaded_files)} files. Skipping remaining {remaining} files to save time.")
+            break
+
         try:
-            # Download with retry decorator for transient failures
-            file_path = _download_single_file_with_retry(file, temp_dir)
+            # Download with timeout to skip slow files
+            logger.info(f"[{tdr}] Downloading file {idx}/{total_files}: {file.file_name}")
+            file_path = download_with_timeout(file, temp_dir, MAX_DOWNLOAD_TIME_PER_FILE)
             downloaded_files.append(file_path)
-            logger.info(f"[{tdr}] Downloaded: {file.file_name}")
+            logger.info(f"[{tdr}] ✓ Downloaded: {file.file_name} ({len(downloaded_files)}/{MAX_FILES_TO_DOWNLOAD} target)")
+        except TimeoutException as e:
+            # File took too long - skip it and continue
+            skipped_count += 1
+            logger.warning(f"[{tdr}] ⏭ Skipping slow file {file.file_name}: {e}")
         except Exception as e:
             # Log failure but continue with other files
             # This prevents 1 bad file from stopping the entire analysis
-            logger.error(f"[{tdr}] Failed to download {file.file_name}: {e}")
+            skipped_count += 1
+            logger.error(f"[{tdr}] ✗ Failed to download {file.file_name}: {e}")
+
+    if skipped_count > 0:
+        logger.info(f"[{tdr}] Downloaded {len(downloaded_files)}/{total_files} files ({skipped_count} skipped)")
 
     return downloaded_files
 
