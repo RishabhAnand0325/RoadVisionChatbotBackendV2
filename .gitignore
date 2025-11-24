@@ -19,3 +19,4 @@ token.json
 __pycache__/
 *.pyc
 model_cache
+app.py
