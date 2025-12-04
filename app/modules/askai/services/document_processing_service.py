@@ -40,6 +40,53 @@ def process_uploaded_pdf(temp_path: str, chat_id_str: str, filename: str, job_id
         if not chat:
             raise Exception(f"Chat {chat_id} not found in database.")
 
+        # 0. Check for existing document with same hash
+        file_hash = get_file_hash(temp_path)
+        existing_doc = doc_repo.get_by_hash(file_hash)
+        
+        if existing_doc:
+            print(f"♻️  Document with hash {file_hash} already exists. Reusing...")
+            
+            # Check if already linked to this chat
+            if existing_doc not in chat.documents:
+                chat.documents.append(existing_doc)
+                db.commit()
+                print(f"🔗 Linked existing document {existing_doc.filename} to chat {chat_id}")
+            else:
+                print(f"🔗 Document {existing_doc.filename} already linked to chat {chat_id}")
+            
+            # FIX: Always ensure vectors are in the current chat's collection
+            try:
+                print(f"🔄 Ensuring vectors exist for chat {chat_id}...")
+                collection = vector_store.get_or_create_collection(chat_id_str)
+                
+                # Reconstruct chunks for vector store
+                chunks_to_add = []
+                for chunk in existing_doc.chunks:
+                    chunks_to_add.append({
+                        "content": chunk.content,
+                        "metadata": chunk.chunk_metadata
+                    })
+                
+                if chunks_to_add:
+                    added_count = vector_store.add_chunks(collection, chunks_to_add)
+                    print(f"✅ Added {added_count} existing chunks to chat {chat_id} vector store")
+                    upload_job.chunks_added = added_count
+                else:
+                    print(f"⚠️ No chunks found in existing document {existing_doc.filename}")
+                    upload_job.chunks_added = 0
+                    
+            except Exception as e:
+                print(f"❌ Error adding existing chunks to vector store: {e}")
+                # We don't fail the whole upload if this fails, but it's bad for RAG
+                
+            # Update job status
+            upload_job.status = ProcessingStatus.FINISHED
+            upload_job.progress = 100
+            upload_job.finished_at = datetime.now().isoformat()
+            # upload_job.chunks_added is set above
+            return
+
         # 1. Process PDF to get chunks and stats
         doc_id = uuid4()
         chunks_as_dicts, stats = pdf_processor.process_pdf(job_id, temp_path, str(doc_id), filename)
@@ -62,7 +109,7 @@ def process_uploaded_pdf(temp_path: str, chat_id_str: str, filename: str, job_id
         new_document = SQLDocument(
             id=doc_id,
             filename=filename,
-            file_hash=get_file_hash(temp_path),
+            file_hash=file_hash,
             file_size=os.path.getsize(temp_path),
             uploaded_at=now,
             processing_stats=stats,

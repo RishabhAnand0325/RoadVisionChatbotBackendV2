@@ -137,8 +137,7 @@ def apply_corrigendum(
 @router.get("/{tender_id}/history", response_model=List[TenderHistoryItem])
 def get_tender_change_history(
     tender_id: str,
-    db: Session = Depends(get_db_session),
-    current_user: User = Depends(get_current_active_user)
+    db: Session = Depends(get_db_session)
 ):
     """
     Get the complete change history for a tender in frontend-compatible format.

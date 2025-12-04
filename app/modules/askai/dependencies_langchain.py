@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from fastapi import Depends
 
 from app.db.database import get_db_session
-from app.core.services import vector_store
+from app.core.services import get_vector_store
 from app.modules.askai.services.langchain_rag_service import LangChainRAGService
 
 
@@ -22,6 +22,7 @@ def get_langchain_rag_service(db: Session = Depends(get_db_session)) -> LangChai
     Returns:
         LangChainRAGService instance
     """
+    vector_store = get_vector_store()
     if not vector_store:
         raise RuntimeError("Vector store not initialized")
 

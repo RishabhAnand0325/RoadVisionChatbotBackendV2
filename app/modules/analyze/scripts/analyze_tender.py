@@ -16,13 +16,14 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.modules.scraper.db.schema import ScrapedTender, ScrapedTenderFile
 from app.modules.tenderiq.db.schema import Tender
+from app.modules.tenderiq.db.repository import TenderWishlistRepository
 from app.modules.analyze.db.schema import TenderAnalysis, AnalysisStatusEnum, AnalysisRFPSection, AnalysisDocumentTemplate
 from app.modules.analyze.models.pydantic_models import (
     OnePagerSchema,
     ScopeOfWorkSchema,
     DataSheetSchema,
 )
-from app.core.services import llm_model, vector_store, pdf_processor
+from app.core.services import get_llm_model, get_vector_store, pdf_processor
 from app.modules.askai.services.document_service import DocumentService
 
 logger = logging.getLogger(__name__)
@@ -215,7 +216,7 @@ def process_document_with_timeout(document_service, job_id: str, file_path: str,
 
 
 # --- Main Analysis Function ---
-def analyze_tender(db: Session, tdr: str):
+def analyze_tender(db: Session, tdr: str, wishlist_id: Optional[str] = None):
     """
     Comprehensive tender analysis pipeline with memory optimization.
 
@@ -226,6 +227,7 @@ def analyze_tender(db: Session, tdr: str):
     4. Create embeddings and store in vector database
     5. Generate 3 types of LLM-based analysis (in parallel for speed)
     6. Store results and clean up temporary files
+    7. Update wishlist progress if wishlist_id is provided
 
     The process uses granular error handling at each step so that failures
     in one step don't cascade to the entire analysis. It also uses retries
@@ -239,6 +241,7 @@ def analyze_tender(db: Session, tdr: str):
     Args:
         db: Database session
         tdr: Tender reference number (e.g., "51655667")
+        wishlist_id: Optional wishlist entry ID to update progress
 
     Returns:
         None (updates TenderAnalysis table with results or error status)
@@ -246,6 +249,21 @@ def analyze_tender(db: Session, tdr: str):
     # Initialize temp_dir and analysis variables so they're available in finally block
     temp_dir = None
     analysis = None
+    wishlist_repo = None
+    
+    # Initialize wishlist repository if wishlist_id is provided
+    if wishlist_id:
+        wishlist_repo = TenderWishlistRepository(db)
+        # Update initial progress
+        try:
+            wishlist_repo.update_wishlist_progress(
+                wishlist_id,
+                progress=0,
+                status_message="Starting analysis",
+                analysis_state=False
+            )
+        except Exception as e:
+            logger.warning(f"[{tdr}] Failed to update initial wishlist progress: {e}")
 
     # Memory optimization: Force garbage collection and check memory
     gc.collect()
@@ -298,7 +316,19 @@ def analyze_tender(db: Session, tdr: str):
         analysis.status = AnalysisStatusEnum.parsing
         analysis.status_message = "Downloading and extracting documents"
         analysis.analysis_started_at = datetime.utcnow()
+        analysis.progress = 10
         db.commit()
+        
+        # Update wishlist progress
+        if wishlist_id and wishlist_repo:
+            try:
+                wishlist_repo.update_wishlist_progress(
+                    wishlist_id,
+                    progress=10,
+                    status_message="Downloading and extracting documents"
+                )
+            except Exception as e:
+                logger.warning(f"[{tdr}] Failed to update wishlist progress: {e}")
 
         # ====================================================================
         # STEP 2: VALIDATE FILES & DOWNLOAD
@@ -315,12 +345,6 @@ def analyze_tender(db: Session, tdr: str):
             return
 
         logger.info(f"[{tdr}] Found {len(files)} files to process")
-
-        # Calculate progress increments based on file count
-        # Progress breakdown: 0-20% setup, 20-70% file processing, 70-100% analysis
-        total_files = len(files)
-        file_progress_range = 50  # 50% of total progress for file processing (20% to 70%)
-        file_progress_increment = file_progress_range / total_files if total_files > 0 else 0
 
         # Create temporary directory for downloads
         # Using uuid4() ensures each run has a unique directory (prevents collisions)
@@ -373,12 +397,11 @@ def analyze_tender(db: Session, tdr: str):
         # Collect all chunks from all processed files
         all_tender_chunks = []
         total_chunks_created = 0
-        files_processed = 0
-        base_progress = 20  # Start file processing at 20%
 
         # Process each downloaded file with comprehensive DocumentService
         # Supports PDF, Excel, HTML, and archive files
-        document_service = DocumentService()
+        # IMPORTANT: Process sequentially (not concurrent) to avoid event loop collisions in LlamaParse
+        processed_count = 0
         skipped_processing = 0
 
         for idx, file_path in enumerate(downloaded_files, 1):
@@ -386,6 +409,9 @@ def analyze_tender(db: Session, tdr: str):
                 file_suffix = file_path.suffix.lower()
                 logger.info(f"[{tdr}] Processing file {idx}/{len(downloaded_files)}: {file_path.name} (format: {file_suffix})")
 
+                # Create a fresh DocumentService for each file to avoid state pollution
+                document_service = DocumentService()
+                
                 # Use DocumentService with timeout to skip image-heavy or problematic documents
                 import uuid as uuid_module
                 doc_id = str(uuid_module.uuid4())
@@ -404,17 +430,11 @@ def analyze_tender(db: Session, tdr: str):
                 if chunks:
                     all_tender_chunks.extend(chunks)
                     total_chunks_created += len(chunks)
+                    processed_count += 1
                     logger.info(f"[{tdr}] ✓ Processed {file_path.name}: {len(chunks)} chunks created (type: {file_suffix})")
                     logger.info(f"[{tdr}] File stats: {stats}")
                 else:
                     logger.warning(f"[{tdr}] No chunks extracted from {file_path.name}")
-
-                # Update progress after each file
-                files_processed += 1
-                current_progress = int(base_progress + (files_processed * file_progress_increment))
-                analysis.progress = min(current_progress, 70)  # Cap at 70%
-                analysis.status_message = f"Processing files: {files_processed}/{total_files} ({total_chunks_created} chunks)"
-                db.commit()
 
             except TimeoutException as e:
                 # Document took too long to process (likely image-heavy) - skip it
@@ -427,9 +447,13 @@ def analyze_tender(db: Session, tdr: str):
                 skipped_processing += 1
                 logger.error(f"[{tdr}] ✗ Failed to process {file_path.name}: {e}", exc_info=True)
                 # Continue with other files - don't fail entire analysis
+            finally:
+                # Force cleanup after each file to prevent event loop issues
+                gc.collect()
+                time.sleep(0.1)  # Small delay between files to ensure event loops fully close
 
         if skipped_processing > 0:
-            logger.info(f"[{tdr}] Processed {files_processed}/{len(downloaded_files)} files ({skipped_processing} skipped during processing)")
+            logger.info(f"[{tdr}] Processed {processed_count}/{len(downloaded_files)} files ({skipped_processing} skipped during processing)")
 
         # Validate that we extracted meaningful chunks
         if not all_tender_chunks:
@@ -440,9 +464,20 @@ def analyze_tender(db: Session, tdr: str):
             return
 
         logger.info(f"[{tdr}] Successfully extracted {total_chunks_created} chunks from documents")
-        analysis.progress = 75
+        analysis.progress = 40
         analysis.status_message = f"Extracted {total_chunks_created} chunks, storing in vector database"
         db.commit()
+        
+        # Update wishlist progress
+        if wishlist_id and wishlist_repo:
+            try:
+                wishlist_repo.update_wishlist_progress(
+                    wishlist_id,
+                    progress=40,
+                    status_message=f"Extracted {total_chunks_created} chunks"
+                )
+            except Exception as e:
+                logger.warning(f"[{tdr}] Failed to update wishlist progress: {e}")
 
         # ====================================================================
         # STEP 4: STORE CHUNKS IN VECTOR DATABASE
@@ -453,23 +488,34 @@ def analyze_tender(db: Session, tdr: str):
         # - Metadata preservation
         # This is much more efficient than manual embedding and storing individually.
         # ====================================================================
-        if vector_store:
+        if get_vector_store():
             try:
                 logger.info(f"[{tdr}] Creating Weaviate collection and storing chunks")
 
                 # Create a new collection for this tender
                 # Deletes any existing collection to ensure freshness
-                tender_collection = vector_store.create_tender_collection(tdr)
+                tender_collection = get_vector_store().create_tender_collection(tdr)
                 logger.info(f"[{tdr}] Created Weaviate collection: {tender_collection.name}")
 
                 # Add all chunks with vectorization handled internally
                 # This uses batch processing for efficiency (batch_size=32)
-                chunks_added = vector_store.add_tender_chunks(tender_collection, all_tender_chunks)
+                chunks_added = get_vector_store().add_tender_chunks(tender_collection, all_tender_chunks)
                 logger.info(f"[{tdr}] Successfully added {chunks_added} chunks to vector database")
 
-                analysis.progress = 80
-                analysis.status_message = f"Stored {chunks_added} chunks, generating analysis"
+                analysis.progress = 60
+                analysis.status_message = f"Stored {chunks_added} chunks in vector database"
                 db.commit()
+                
+                # Update wishlist progress
+                if wishlist_id and wishlist_repo:
+                    try:
+                        wishlist_repo.update_wishlist_progress(
+                            wishlist_id,
+                            progress=60,
+                            status_message="Stored chunks in vector database"
+                        )
+                    except Exception as e:
+                        logger.warning(f"[{tdr}] Failed to update wishlist progress: {e}")
 
             except Exception as e:
                 logger.error(f"[{tdr}] Failed to store chunks in vector database: {e}", exc_info=True)
@@ -531,6 +577,17 @@ def analyze_tender(db: Session, tdr: str):
         analysis.progress = 70
         analysis.status_message = "Generating executive summary"
         db.commit()
+        
+        # Update wishlist progress
+        if wishlist_id and wishlist_repo:
+            try:
+                wishlist_repo.update_wishlist_progress(
+                    wishlist_id,
+                    progress=70,
+                    status_message="Generating executive summary"
+                )
+            except Exception as e:
+                logger.warning(f"[{tdr}] Failed to update wishlist progress: {e}")
 
         one_pager = _generate_executive_summary(tender_context, tdr)
         if one_pager:
@@ -544,6 +601,17 @@ def analyze_tender(db: Session, tdr: str):
         analysis.progress = 80
         analysis.status_message = "Generating scope of work"
         db.commit()
+        
+        # Update wishlist progress
+        if wishlist_id and wishlist_repo:
+            try:
+                wishlist_repo.update_wishlist_progress(
+                    wishlist_id,
+                    progress=80,
+                    status_message="Generating scope of work"
+                )
+            except Exception as e:
+                logger.warning(f"[{tdr}] Failed to update wishlist progress: {e}")
 
         scope_of_work = _generate_scope_of_work_details(tender_context, scraped_tender, tdr)
         if scope_of_work:
@@ -557,6 +625,17 @@ def analyze_tender(db: Session, tdr: str):
         analysis.progress = 90
         analysis.status_message = "Generating datasheet"
         db.commit()
+        
+        # Update wishlist progress
+        if wishlist_id and wishlist_repo:
+            try:
+                wishlist_repo.update_wishlist_progress(
+                    wishlist_id,
+                    progress=90,
+                    status_message="Generating datasheet"
+                )
+            except Exception as e:
+                logger.warning(f"[{tdr}] Failed to update wishlist progress: {e}")
 
         data_sheet = _generate_comprehensive_datasheet(tender_context, scraped_tender, tdr)
         if data_sheet:
@@ -611,6 +690,19 @@ def analyze_tender(db: Session, tdr: str):
         analysis.status_message = "Analysis completed successfully"
         analysis.analysis_completed_at = datetime.utcnow()
         db.commit()
+        
+        # Update wishlist progress - mark analysis as complete
+        if wishlist_id and wishlist_repo:
+            try:
+                wishlist_repo.update_wishlist_progress(
+                    wishlist_id,
+                    progress=100,
+                    analysis_state=True,
+                    status_message="Analysis completed successfully"
+                )
+                logger.info(f"[{tdr}] Updated wishlist progress to 100% (analysis complete)")
+            except Exception as e:
+                logger.warning(f"[{tdr}] Failed to update wishlist completion: {e}")
 
         logger.info(f"[{tdr}] Analysis pipeline completed successfully")
 
@@ -621,6 +713,17 @@ def analyze_tender(db: Session, tdr: str):
             analysis.status = AnalysisStatusEnum.failed
             analysis.error_message = f"Analysis failed: {str(e)[:500]}"  # Truncate to DB limit
             db.commit()
+        
+        # Update wishlist with error
+        if wishlist_id and wishlist_repo:
+            try:
+                wishlist_repo.update_wishlist_progress(
+                    wishlist_id,
+                    error_message=f"Analysis failed: {str(e)[:500]}",
+                    status_message="Analysis failed"
+                )
+            except Exception as update_error:
+                logger.error(f"[{tdr}] Failed to update wishlist error status: {update_error}")
 
     finally:
         # ====================================================================
@@ -651,6 +754,7 @@ def _download_files_with_retry(
 
     This function implements robust file downloading with:
     - Timeout for each file to skip slow/hanging downloads
+    - Early stopping once MAX_FILES_TO_DOWNLOAD successful downloads achieved
     - Retry logic for transient network failures
     - Graceful handling of partial failures (if 1 file fails, others proceed)
     - Logging of each download attempt
@@ -818,7 +922,7 @@ CONTEXT:
 Generate JSON only, no explanations:"""
 
         # Call LLM to generate response
-        response = llm_model.generate_content(prompt)
+        response = get_llm_model().generate_content(prompt)
         response_text = response.text.strip()
 
         # Parse JSON from response (may be wrapped in code fences)
@@ -869,14 +973,10 @@ Respond ONLY with valid JSON. Use this exact structure:
     "project_details": {{
         "project_name": "Project name/title",
         "location": "Project location/address",
-        "total_length": "length in km (EXTRACT NUMERIC VALUE ONLY, e.g., '45.5 km')",
+        "total_length": "length in km if applicable",
         "total_area": "total area in square meters or relevant units",
         "duration": "project duration/timeline",
-        "contract_value": "total project value with currency",
-        "road_length_km": 0.0,
-        "span_length_m": 0.0,
-        "road_work_value_cr": 0.0,
-        "structure_work_value_cr": 0.0
+        "contract_value": "total project value with currency"
     }},
     "work_packages": [
         {{
@@ -930,30 +1030,12 @@ IMPORTANT NOTES:
 - Provide realistic quantities and units for components
 - Use actual values from the tender document
 
-**CRITICAL - Engineering Metrics Extraction:**
-In project_details, you MUST extract these specific values:
-1. "road_length_km": Total road length in kilometers as NUMERIC value (e.g., 45.5, not "45.5 km")
-2. "span_length_m": Total bridge/span length in meters as NUMERIC value (if applicable, otherwise 0)
-3. "road_work_value_cr": Cost of road work in crores as NUMERIC value (if breakdown available, otherwise 0)
-4. "structure_work_value_cr": Cost of structure/bridge work in crores as NUMERIC value (if breakdown available, otherwise 0)
-
-Look for these in:
-- Project details section
-- Bill of quantities (BOQ)
-- Scope of work descriptions
-- Work package details
-- Any mention of "road", "highway", "length", "km", "span", "bridge", "road work", "structure work"
-
-If exact breakdown not available:
-- For road projects: Estimate road_work as 70% of total value, structure_work as 30%
-- Set values to 0 if not a road/infrastructure project
-
 CONTEXT:
 {context}
 
 Generate JSON only, no explanations:"""
 
-        response = llm_model.generate_content(prompt)
+        response = get_llm_model().generate_content(prompt)
         response_text = response.text.strip()
 
         # Parse JSON from response (may be wrapped in code fences)
@@ -1047,7 +1129,7 @@ TENDER DOCUMENT:
 
 Generate JSON only, no explanations:"""
 
-        response = llm_model.generate_content(prompt)
+        response = get_llm_model().generate_content(prompt)
         response_text = response.text.strip()
 
         # Parse JSON from response (may be wrapped in code fences)
@@ -1120,7 +1202,7 @@ def _generate_rfp_sections(context: str, analysis_id, db: Session, tdr: str) -> 
         Focus on creating comprehensive sections that cover all important aspects.
         """
 
-        response = llm_model.generate_content(prompt)
+        response = get_llm_model().generate_content(prompt)
         if not response or not response.text:
             logger.error(f"[{tdr}] No response from LLM for RFP sections")
             return []
@@ -1226,7 +1308,7 @@ def _extract_document_templates(context: str, analysis_id, db: Session, tdr: str
         Focus on actual submission requirements and formats that bidders must follow.
         """
 
-        response = llm_model.generate_content(prompt)
+        response = get_llm_model().generate_content(prompt)
         if not response or not response.text:
             logger.error(f"[{tdr}] No response from LLM for document templates")
             return []

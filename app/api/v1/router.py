@@ -22,5 +22,5 @@ api_v1_router.include_router(analyze_router, prefix="/analyze", tags=["Analyze"]
 
 
 # In the future, you can add other module routers here:
-# from app.modules.dashboard.router import router as dashboard_router
-# api_v1_router.include_router(dashboard_router, prefix="/dashboard", tags=["Dashboard"])
+from app.modules.dashboard.route import router as dashboard_router
+api_v1_router.include_router(dashboard_router, prefix="/dashboard", tags=["Dashboard"])

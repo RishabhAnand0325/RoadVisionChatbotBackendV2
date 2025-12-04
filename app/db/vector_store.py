@@ -20,8 +20,18 @@ class VectorStoreManager:
     def similarity_search(self, collection_name: str, query_text: str, limit: int):
         if not self.client:
             return []
-        collection = self.client.collections.get(collection_name)
-        return self.query(collection, query_text, limit)
+        
+        # Check if collection exists before attempting to query
+        if not self.client.collections.exists(collection_name):
+            print(f"⚠️  Collection {collection_name} does not exist for similarity search.")
+            return []
+        
+        try:
+            collection = self.client.collections.get(collection_name)
+            return self.query(collection, query_text, limit)
+        except Exception as e:
+            print(f"❌ Error in similarity_search for collection {collection_name}: {e}")
+            return []
 
     def get_or_create_collection(self, chat_id: str) -> Collection:
         """Get or create collection for chat in Weaviate."""

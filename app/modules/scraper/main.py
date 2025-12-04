@@ -183,6 +183,47 @@ def scrape_link(link: str, source_priority: str = "normal", skip_dedup_check: bo
                             logger.debug(f"💾 Saving to 'scraped_tenders': {tender_data.tender_name}")
                             scraped_tender_orm = scraper_repo.add_scraped_tender_details(query_orm, tender_data, tender_release_date)
                             logger.debug(f"✅ Saved to 'scraped_tenders'.")
+                            
+                            # 2.5. Check for corrigendums (NEW TENDERS or UPDATED TENDERS)
+                            # This automatically detects when a tender has been re-scraped with changes
+                            logger.debug(f"🔍 Checking for corrigendum/changes in: {tender_data.tender_name}")
+                            try:
+                                from app.modules.tenderiq.services.corrigendum_service import CorrigendumTrackingService
+                                from app.modules.tenderiq.db.repository import TenderRepository as TIQTenderRepository
+                                
+                                # Create corrigendum service
+                                corrigendum_service = CorrigendumTrackingService(scraper_repo.db)
+                                tender_ref = scraped_tender_orm.tender_id_str or scraped_tender_orm.tdr
+                                
+                                # Check if main tender exists
+                                tiq_repo = TIQTenderRepository(scraper_repo.db)
+                                main_tender = tiq_repo.get_by_tender_ref(tender_ref)
+                                
+                                if main_tender:
+                                    # Get previous scrapes (excluding the one we just added)
+                                    from sqlalchemy import and_
+                                    previous_scrapes = scraper_repo.db.query(type(scraped_tender_orm)).filter(
+                                        and_(
+                                            type(scraped_tender_orm).tender_id_str == tender_ref,
+                                            type(scraped_tender_orm).id != scraped_tender_orm.id  # Exclude current
+                                        )
+                                    ).order_by(type(scraped_tender_orm).id.desc()).limit(1).first()
+                                    
+                                    if previous_scrapes:
+                                        # Compare with previous version
+                                        changes = corrigendum_service.detect_changes(tender_ref, scraped_tender_orm)
+                                        
+                                        if changes:
+                                            logger.info(f"🔔 CORRIGENDUM DETECTED for {tender_ref}: {len(changes)} changes found")
+                                            for change in changes:
+                                                logger.info(f"   • {change.field}: {change.old_value} → {change.new_value}")
+                                            # Corrigendum will be stored in TenderActionHistory when apply_corrigendum is called
+                                            # For now, just log it - admin can review and apply if needed
+                                        else:
+                                            logger.debug(f"   ✓ No changes detected (same as previous scrape)")
+                            except Exception as corr_error:
+                                logger.debug(f"   ⚠️  Error checking for corrigendum: {str(corr_error)}")
+                                # Don't fail the main scraping if corrigendum detection fails
 
                             # 3. Populate main tenders table
                             logger.debug(f"💾 Saving to 'tenders': {tender_data.tender_name}")

@@ -90,7 +90,7 @@ class CorrigendumTrackingService:
         # Get previous scraped data
         old_scraped = self.db.query(ScrapedTender).filter(
             ScrapedTender.tender_id_str == tender_id
-        ).order_by(ScrapedTender.scraped_at.desc()).first()
+        ).order_by(ScrapedTender.id.desc()).first()
         
         if not old_scraped:
             return []
@@ -228,8 +228,8 @@ class CorrigendumTrackingService:
                     # Ensure date_change always has the required structure
                     if date_change is None:
                         date_change = {
-                            "from_date": datetime.min.replace(tzinfo=timezone.utc).isoformat(),
-                            "to_date": datetime.min.replace(tzinfo=timezone.utc).isoformat()
+                            "from_date": None,
+                            "to_date": None
                         }
                     
                     history_item = {

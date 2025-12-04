@@ -8,6 +8,8 @@ import email
 import os
 from email.message import EmailMessage
 
+from .email_template_validator import validate_email_template
+
 load_dotenv()
 
 # --- Configuration ---
@@ -119,6 +121,20 @@ def listen_and_get_unprocessed_emails() -> list[dict] | None:
 
                             # Extract tender link
                             if html_body:
+                                # SECURITY CHECK: Validate email template structure
+                                is_valid, current_hash, error_msg = validate_email_template(html_body, sender)
+                                
+                                if not is_valid:
+                                    print(f"🚨 SECURITY ALERT: Email template validation failed for email {email_uid}")
+                                    print(f"   Sender: {sender}")
+                                    print(f"   Error: {error_msg}")
+                                    print(f"   ⛔ Processing stopped for this email. No backend changes made.")
+                                    continue  # Skip this email - don't process it
+                                
+                                if error_msg and "No template hash found" in error_msg:
+                                    print(f"⚠️  WARNING: {error_msg}")
+                                    print(f"   Consider setting up template hash for {sender} using set_template_hash()")
+                                
                                 tender_url = find_scrape_link(html_body)
                                 if tender_url:
                                     unprocessed_emails.append({
@@ -127,6 +143,7 @@ def listen_and_get_unprocessed_emails() -> list[dict] | None:
                                         'email_date': email_date,
                                         'tender_url': tender_url,
                                         'message': msg,
+                                        'html_body': html_body,  # Include for reference
                                     })
                                     print(f"✅ Extracted tender URL from email {email_uid}: {tender_url}")
 

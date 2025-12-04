@@ -11,6 +11,7 @@ from app.modules.scraper.db.schema import (
     ScrapedTenderFile,
     ScrapedTenderQuery,
     ScrapedEmailLog,
+    EmailTemplateHash,
 )
 
 
@@ -78,7 +79,19 @@ class ScraperRepository:
         """
         Creates a single ScrapedTender record with all its details and files,
         associating it with an existing ScrapedTenderQuery.
+        Handles deduplication by checking if TDR already exists.
         """
+        # DEDUPLICATION: Check if tender with same TDR already exists
+        if tender_data.details and tender_data.details.notice.tdr:
+            existing_tdr = self.db.query(ScrapedTender).filter(
+                ScrapedTender.tdr == tender_data.details.notice.tdr
+            ).first()
+            
+            if existing_tdr:
+                # TDR already exists, return the existing record instead of creating duplicate
+                print(f"⚠️  TDR {tender_data.details.notice.tdr} already exists (ID: {existing_tdr.id}), skipping duplicate")
+                return existing_tdr
+        
         scraped_tender = ScrapedTender(
             tender_id_str=tender_data.tender_id,
             tender_name=tender_data.tender_name,
@@ -491,3 +504,65 @@ class ScraperRepository:
         # Keep only alphanumeric, hyphens, underscores
         name = re.sub(r'[^\w\-]', '', name)
         return f"{name}{ext}" if ext else name
+
+    # ==================== EMAIL TEMPLATE HASH MANAGEMENT ====================
+
+    def get_active_template_hash(self, email_sender: str) -> Optional[EmailTemplateHash]:
+        """
+        Get the active template hash for a sender.
+        
+        Args:
+            email_sender: Email sender address
+            
+        Returns:
+            EmailTemplateHash record if found, None otherwise
+        """
+        return self.db.query(EmailTemplateHash).filter(
+            EmailTemplateHash.email_sender == email_sender,
+            EmailTemplateHash.is_active == True
+        ).first()
+
+    def set_template_hash(self, template_hash: str, email_sender: str, description: Optional[str] = None) -> EmailTemplateHash:
+        """
+        Set or update the template hash for a sender.
+        
+        Args:
+            template_hash: SHA256 hash of the template structure
+            email_sender: Email sender address
+            description: Optional description
+            
+        Returns:
+            EmailTemplateHash record
+        """
+        # Deactivate old templates for this sender
+        self.db.query(EmailTemplateHash).filter(
+            EmailTemplateHash.email_sender == email_sender
+        ).update({'is_active': False})
+        
+        # Check if this exact hash already exists
+        existing = self.db.query(EmailTemplateHash).filter(
+            EmailTemplateHash.template_hash == template_hash,
+            EmailTemplateHash.email_sender == email_sender
+        ).first()
+        
+        if existing:
+            existing.is_active = True
+            existing.last_validated_at = datetime.utcnow()
+            if description:
+                existing.description = description
+            self.db.commit()
+            self.db.refresh(existing)
+            return existing
+        
+        # Create new template hash
+        new_hash = EmailTemplateHash(
+            template_hash=template_hash,
+            email_sender=email_sender,
+            is_active=True,
+            description=description,
+            last_validated_at=datetime.utcnow()
+        )
+        self.db.add(new_hash)
+        self.db.commit()
+        self.db.refresh(new_hash)
+        return new_hash

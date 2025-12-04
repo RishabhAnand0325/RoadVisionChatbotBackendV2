@@ -10,11 +10,11 @@ Provides APIs for retrieving tender analysis results including:
 """
 from uuid import UUID
 import logging
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from sqlalchemy.orm import Session
 
-from app.db.database import get_db_session
-from app.modules.analyze.db.schema import TenderAnalysis
+from app.db.database import get_db_session, SessionLocal
+from app.modules.analyze.db.schema import TenderAnalysis, AnalysisStatusEnum
 from app.modules.analyze.models.pydantic_models import TenderAnalysisResponse
 from app.modules.auth.services.auth_service import get_current_active_user
 from app.modules.analyze.repositories import repository as analyze_repo
@@ -146,6 +146,22 @@ def get_tender_analysis(
         )
 
 
+def run_analysis_background(tender_ref: str):
+    """
+    Wrapper to run analysis in background with its own DB session.
+    """
+    from app.modules.analyze.scripts.analyze_tender import analyze_tender
+    
+    db = SessionLocal()
+    try:
+        logger.info(f"Starting background analysis for {tender_ref}")
+        analyze_tender(db, tender_ref)
+    except Exception as e:
+        logger.error(f"Background analysis failed for {tender_ref}: {e}", exc_info=True)
+    finally:
+        db.close()
+
+
 @router.post(
     "/trigger/{tender_ref}",
     summary="Trigger Tender Analysis",
@@ -154,6 +170,7 @@ def get_tender_analysis(
 )
 def trigger_tender_analysis(
     tender_ref: str,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db_session),
     # current_user=Depends(get_current_active_user),  # Removed auth for testing
 ):
@@ -162,6 +179,7 @@ def trigger_tender_analysis(
     
     Args:
         tender_ref: Tender reference number (e.g., "51184507")
+        background_tasks: FastAPI background tasks
         db: Database session
         current_user: Authenticated user
         
@@ -172,8 +190,25 @@ def trigger_tender_analysis(
         from app.modules.analyze.scripts.analyze_tender import analyze_tender
         
         # Check if tender exists
+        # Check if tender exists
         from app.modules.tenderiq.db.schema import Tender
-        tender = db.query(Tender).filter(Tender.tender_ref_number == tender_ref).first()
+        from uuid import UUID
+        
+        tender = None
+        
+        # Try to treat input as UUID first
+        try:
+            uuid_obj = UUID(tender_ref)
+            tender = db.query(Tender).filter(Tender.id == uuid_obj).first()
+            if tender:
+                tender_ref = tender.tender_ref_number
+        except ValueError:
+            pass
+            
+        # If not found by UUID, try by ref number
+        if not tender:
+            tender = db.query(Tender).filter(Tender.tender_ref_number == tender_ref).first()
+            
         if not tender:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -182,16 +217,16 @@ def trigger_tender_analysis(
         
         # Check if already analyzed
         existing = db.query(TenderAnalysis).filter(TenderAnalysis.tender_id == tender_ref).first()
-        if existing and existing.status == AnalysisStatusEnum.COMPLETED:
+        if existing and existing.status == AnalysisStatusEnum.completed:
             return {
                 "status": "already_analyzed",
                 "message": f"Tender {tender_ref} is already analyzed",
                 "analysis_id": str(existing.id)
             }
         
-        # Trigger analysis
-        logger.info(f"Triggering analysis for tender {tender_ref}")
-        analyze_tender(db, tender_ref)
+        # Trigger analysis in background
+        logger.info(f"Triggering analysis for tender {tender_ref} in background")
+        background_tasks.add_task(run_analysis_background, tender_ref)
         
         return {
             "status": "success",
@@ -835,7 +870,6 @@ def generate_excel_report(analysis, rfp_sections, templates):
     header_font = Font(bold=True, color="FFFFFF", size=12)
     title_font = Font(bold=True, size=16, color="1a56db")
     subheader_font = Font(bold=True, size=11)
-    normal_font = Font(size=10)
     border = Border(
         left=Side(style='thin'),
         right=Side(style='thin'),
@@ -869,7 +903,7 @@ def generate_excel_report(analysis, rfp_sections, templates):
     ws_summary.column_dimensions['A'].width = 20
     ws_summary.column_dimensions['B'].width = 40
     
-    # ONE PAGER SHEET - ENHANCED
+    # ONE PAGER SHEET
     if analysis.one_pager_json:
         ws_one_pager = wb.create_sheet("One Pager")
         one_pager = analysis.one_pager_json
@@ -880,7 +914,6 @@ def generate_excel_report(analysis, rfp_sections, templates):
         ws_one_pager.merge_cells(f'A{row}:C{row}')
         row += 2
         
-        # Project Overview
         if one_pager.get('project_overview'):
             ws_one_pager[f'A{row}'] = "Project Overview"
             ws_one_pager[f'A{row}'].font = subheader_font
@@ -890,29 +923,6 @@ def generate_excel_report(analysis, rfp_sections, templates):
             ws_one_pager.merge_cells(f'A{row}:C{row}')
             row += 2
         
-        # Eligibility Highlights
-        if one_pager.get('eligibility_highlights'):
-            ws_one_pager[f'A{row}'] = "Eligibility Highlights"
-            ws_one_pager[f'A{row}'].font = subheader_font
-            row += 1
-            for highlight in one_pager['eligibility_highlights']:
-                ws_one_pager[f'A{row}'] = f"• {highlight}"
-                ws_one_pager[f'A{row}'].alignment = Alignment(wrap_text=True)
-                ws_one_pager.merge_cells(f'A{row}:C{row}')
-                row += 1
-            row += 1
-        
-        # Important Dates
-        if one_pager.get('important_dates'):
-            ws_one_pager[f'A{row}'] = "Important Dates"
-            ws_one_pager[f'A{row}'].font = subheader_font
-            row += 1
-            for date_info in one_pager['important_dates']:
-                ws_one_pager[f'A{row}'] = f"• {date_info}"
-                row += 1
-            row += 1
-        
-        # Financial Requirements
         if one_pager.get('financial_requirements'):
             ws_one_pager[f'A{row}'] = "Financial Requirements"
             ws_one_pager[f'A{row}'].font = subheader_font
@@ -922,198 +932,9 @@ def generate_excel_report(analysis, rfp_sections, templates):
                 row += 1
             row += 1
         
-        # Risk Analysis
-        if one_pager.get('risk_analysis'):
-            risk = one_pager['risk_analysis']
-            ws_one_pager[f'A{row}'] = "Risk Analysis"
-            ws_one_pager[f'A{row}'].font = subheader_font
-            row += 1
-            
-            if risk.get('summary'):
-                ws_one_pager[f'A{row}'] = risk['summary']
-                ws_one_pager[f'A{row}'].alignment = Alignment(wrap_text=True)
-                ws_one_pager.merge_cells(f'A{row}:C{row}')
-                row += 2
-            
-            if risk.get('high_risk_factors'):
-                ws_one_pager[f'A{row}'] = "High Risk Factors:"
-                ws_one_pager[f'A{row}'].font = Font(bold=True, size=10, color="FF0000")
-                row += 1
-                for factor in risk['high_risk_factors']:
-                    ws_one_pager[f'A{row}'] = f"• {factor}"
-                    row += 1
-                row += 1
-            
-            if risk.get('low_risk_areas'):
-                ws_one_pager[f'A{row}'] = "Low Risk Areas:"
-                ws_one_pager[f'A{row}'].font = Font(bold=True, size=10, color="00AA00")
-                row += 1
-                for area in risk['low_risk_areas']:
-                    ws_one_pager[f'A{row}'] = f"• {area}"
-                    row += 1
-                row += 1
-            
-            if risk.get('compliance_concerns'):
-                ws_one_pager[f'A{row}'] = "Compliance Concerns:"
-                ws_one_pager[f'A{row}'].font = Font(bold=True, size=10, color="FFA500")
-                row += 1
-                for concern in risk['compliance_concerns']:
-                    ws_one_pager[f'A{row}'] = f"• {concern}"
-                    row += 1
-                row += 1
-        
-        ws_one_pager.column_dimensions['A'].width = 100
-        ws_one_pager.column_dimensions['B'].width = 20
-        ws_one_pager.column_dimensions['C'].width = 20
+        ws_one_pager.column_dimensions['A'].width = 80
     
-    # SCOPE OF WORK SHEET - NEW
-    if analysis.scope_of_work_json:
-        ws_scope = wb.create_sheet("Scope of Work")
-        scope = analysis.scope_of_work_json
-        row = 1
-        
-        ws_scope[f'A{row}'] = "SCOPE OF WORK"
-        ws_scope[f'A{row}'].font = title_font
-        ws_scope.merge_cells(f'A{row}:D{row}')
-        row += 2
-        
-        # Project Details
-        if scope.get('project_details'):
-            details = scope['project_details']
-            ws_scope[f'A{row}'] = "Project Details"
-            ws_scope[f'A{row}'].font = subheader_font
-            ws_scope[f'A{row}'].fill = PatternFill(start_color="E0E0E0", end_color="E0E0E0", fill_type="solid")
-            ws_scope.merge_cells(f'A{row}:B{row}')
-            row += 1
-            
-            for key, value in details.items():
-                if value:
-                    label = key.replace('_', ' ').title()
-                    ws_scope[f'A{row}'] = label
-                    ws_scope[f'B{row}'] = str(value)
-                    ws_scope[f'A{row}'].border = border
-                    ws_scope[f'B{row}'].border = border
-                    row += 1
-            row += 1
-        
-        # Work Packages
-        if scope.get('work_packages'):
-            ws_scope[f'A{row}'] = "Work Packages"
-            ws_scope[f'A{row}'].font = subheader_font
-            ws_scope[f'A{row}'].fill = PatternFill(start_color="E0E0E0", end_color="E0E0E0", fill_type="solid")
-            ws_scope.merge_cells(f'A{row}:D{row}')
-            row += 1
-            
-            # Headers for work packages
-            headers = ['Package ID', 'Name', 'Description', 'Duration']
-            for col, header in enumerate(headers, start=1):
-                cell = ws_scope.cell(row=row, column=col, value=header)
-                cell.font = header_font
-                cell.fill = header_fill
-                cell.alignment = Alignment(horizontal='center')
-                cell.border = border
-            row += 1
-            
-            for package in scope['work_packages']:
-                ws_scope[f'A{row}'] = package.get('id', '')
-                ws_scope[f'B{row}'] = package.get('name', '')
-                ws_scope[f'C{row}'] = package.get('description', '')
-                ws_scope[f'D{row}'] = package.get('estimated_duration', '')
-                
-                for col in range(1, 5):
-                    cell = ws_scope.cell(row=row, column=col)
-                    cell.border = border
-                    cell.alignment = Alignment(wrap_text=True)
-                row += 1
-                
-                # Components sub-table
-                if package.get('components'):
-                    ws_scope[f'B{row}'] = "Components:"
-                    ws_scope[f'B{row}'].font = Font(bold=True, size=9)
-                    row += 1
-                    for component in package['components']:
-                        comp_text = f"• {component.get('item', '')}"
-                        if component.get('quantity') and component.get('unit'):
-                            comp_text += f" ({component['quantity']} {component['unit']})"
-                        ws_scope[f'B{row}'] = comp_text
-                        ws_scope[f'B{row}'].alignment = Alignment(wrap_text=True)
-                        ws_scope.merge_cells(f'B{row}:D{row}')
-                        row += 1
-                row += 1
-            row += 1
-        
-        # Technical Specifications
-        if scope.get('technical_specifications'):
-            tech = scope['technical_specifications']
-            ws_scope[f'A{row}'] = "Technical Specifications"
-            ws_scope[f'A{row}'].font = subheader_font
-            ws_scope[f'A{row}'].fill = PatternFill(start_color="E0E0E0", end_color="E0E0E0", fill_type="solid")
-            ws_scope.merge_cells(f'A{row}:D{row}')
-            row += 1
-            
-            if tech.get('standards'):
-                ws_scope[f'A{row}'] = "Standards:"
-                ws_scope[f'A{row}'].font = Font(bold=True, size=10)
-                row += 1
-                for std in tech['standards']:
-                    ws_scope[f'A{row}'] = f"• {std}"
-                    ws_scope.merge_cells(f'A{row}:D{row}')
-                    row += 1
-                row += 1
-            
-            if tech.get('quality_requirements'):
-                ws_scope[f'A{row}'] = "Quality Requirements:"
-                ws_scope[f'A{row}'].font = Font(bold=True, size=10)
-                row += 1
-                for req in tech['quality_requirements']:
-                    ws_scope[f'A{row}'] = f"• {req}"
-                    ws_scope.merge_cells(f'A{row}:D{row}')
-                    row += 1
-                row += 1
-        
-        # Deliverables
-        if scope.get('deliverables'):
-            ws_scope[f'A{row}'] = "Deliverables"
-            ws_scope[f'A{row}'].font = subheader_font
-            ws_scope[f'A{row}'].fill = PatternFill(start_color="E0E0E0", end_color="E0E0E0", fill_type="solid")
-            ws_scope.merge_cells(f'A{row}:C{row}')
-            row += 1
-            
-            headers = ['Item', 'Description', 'Timeline']
-            for col, header in enumerate(headers, start=1):
-                cell = ws_scope.cell(row=row, column=col, value=header)
-                cell.font = header_font
-                cell.fill = header_fill
-                cell.border = border
-            row += 1
-            
-            for deliverable in scope['deliverables']:
-                ws_scope[f'A{row}'] = deliverable.get('item', '')
-                ws_scope[f'B{row}'] = deliverable.get('description', '')
-                ws_scope[f'C{row}'] = deliverable.get('timeline', '')
-                for col in range(1, 4):
-                    ws_scope.cell(row=row, column=col).border = border
-                row += 1
-            row += 1
-        
-        # Exclusions
-        if scope.get('exclusions'):
-            ws_scope[f'A{row}'] = "Exclusions"
-            ws_scope[f'A{row}'].font = subheader_font
-            ws_scope[f'A{row}'].fill = PatternFill(start_color="FFE0E0", end_color="FFE0E0", fill_type="solid")
-            ws_scope.merge_cells(f'A{row}:D{row}')
-            row += 1
-            for exclusion in scope['exclusions']:
-                ws_scope[f'A{row}'] = f"• {exclusion}"
-                ws_scope.merge_cells(f'A{row}:D{row}')
-                row += 1
-        
-        ws_scope.column_dimensions['A'].width = 25
-        ws_scope.column_dimensions['B'].width = 40
-        ws_scope.column_dimensions['C'].width = 40
-        ws_scope.column_dimensions['D'].width = 20
-    
-    # DATA SHEET - ENHANCED
+    # DATA SHEET
     if analysis.data_sheet_json:
         ws_datasheet = wb.create_sheet("Data Sheet")
         datasheet = analysis.data_sheet_json
@@ -1141,140 +962,36 @@ def generate_excel_report(analysis, rfp_sections, templates):
                 row += 1
                 
                 for item in items:
-                    ws_datasheet[f'A{row}'] = item.get('label', '')
-                    ws_datasheet[f'B{row}'] = item.get('value', '')
+                    ws_datasheet[f'A{row}'] = item['label']
+                    ws_datasheet[f'B{row}'] = item['value']
                     ws_datasheet[f'A{row}'].border = border
                     ws_datasheet[f'B{row}'].border = border
-                    
-                    # Highlight important items
-                    if item.get('highlight'):
-                        ws_datasheet[f'A{row}'].font = Font(bold=True)
-                        ws_datasheet[f'B{row}'].font = Font(bold=True)
-                        ws_datasheet[f'B{row}'].fill = PatternFill(start_color="FFFFCC", end_color="FFFFCC", fill_type="solid")
-                    
                     row += 1
                 row += 1
         
-        ws_datasheet.column_dimensions['A'].width = 35
-        ws_datasheet.column_dimensions['B'].width = 60
+        ws_datasheet.column_dimensions['A'].width = 30
+        ws_datasheet.column_dimensions['B'].width = 50
 
-    # RFP SECTIONS SHEET - NEW
-    if rfp_sections:
-        ws_rfp = wb.create_sheet("RFP Sections")
-        row = 1
-        
-        ws_rfp[f'A{row}'] = "RFP SECTION ANALYSIS"
-        ws_rfp[f'A{row}'].font = title_font
-        ws_rfp.merge_cells(f'A{row}:E{row}')
-        row += 2
-        
-        # Headers
-        headers = ['Section #', 'Title', 'Summary', 'Key Requirements', 'Compliance Issues']
-        for col, header in enumerate(headers, start=1):
-            cell = ws_rfp.cell(row=row, column=col, value=header)
-            cell.font = header_font
-            cell.fill = header_fill
-            cell.alignment = Alignment(horizontal='center', wrap_text=True)
-            cell.border = border
-        row += 1
-        
-        for section in rfp_sections:
-            start_row = row
-            ws_rfp[f'A{row}'] = section.section_number or ''
-            ws_rfp[f'B{row}'] = section.section_title or ''
-            ws_rfp[f'C{row}'] = section.summary or ''
-            
-            # Key requirements
-            if section.key_requirements:
-                reqs = '\n'.join([f"• {req}" for req in section.key_requirements])
-                ws_rfp[f'D{row}'] = reqs
-            
-            # Compliance issues
-            if section.compliance_issues:
-                issues = '\n'.join([f"• {issue}" for issue in section.compliance_issues])
-                ws_rfp[f'E{row}'] = issues
-            
-            # Apply borders and alignment
-            for col in range(1, 6):
-                cell = ws_rfp.cell(row=row, column=col)
-                cell.border = border
-                cell.alignment = Alignment(wrap_text=True, vertical='top')
-            
-            row += 1
-        
-        ws_rfp.column_dimensions['A'].width = 12
-        ws_rfp.column_dimensions['B'].width = 35
-        ws_rfp.column_dimensions['C'].width = 45
-        ws_rfp.column_dimensions['D'].width = 40
-        ws_rfp.column_dimensions['E'].width = 40
-    
-    # BID SYNOPSIS / QUALIFICATIONS SHEET - NEW
-    if analysis.bid_synopsis_json:
-        ws_bid = wb.create_sheet("Qualifications")
-        bid_synopsis = analysis.bid_synopsis_json
-        row = 1
-        
-        ws_bid[f'A{row}'] = "QUALIFICATION CRITERIA"
-        ws_bid[f'A{row}'].font = title_font
-        ws_bid.merge_cells(f'A{row}:C{row}')
-        row += 2
-        
-        # Iterate through qualification categories
-        for category, criteria in bid_synopsis.items():
-            if criteria and isinstance(criteria, (list, dict)):
-                ws_bid[f'A{row}'] = category.replace('_', ' ').title()
-                ws_bid[f'A{row}'].font = subheader_font
-                ws_bid[f'A{row}'].fill = PatternFill(start_color="E0E0E0", end_color="E0E0E0", fill_type="solid")
-                ws_bid.merge_cells(f'A{row}:C{row}')
-                row += 1
-                
-                if isinstance(criteria, list):
-                    for item in criteria:
-                        if isinstance(item, dict):
-                            for key, value in item.items():
-                                ws_bid[f'A{row}'] = key.replace('_', ' ').title()
-                                ws_bid[f'B{row}'] = str(value)
-                                ws_bid[f'A{row}'].border = border
-                                ws_bid[f'B{row}'].border = border
-                                row += 1
-                        else:
-                            ws_bid[f'A{row}'] = f"• {item}"
-                            ws_bid.merge_cells(f'A{row}:C{row}')
-                            row += 1
-                elif isinstance(criteria, dict):
-                    for key, value in criteria.items():
-                        ws_bid[f'A{row}'] = key.replace('_', ' ').title()
-                        ws_bid[f'B{row}'] = str(value)
-                        ws_bid[f'A{row}'].border = border
-                        ws_bid[f'B{row}'].border = border
-                        row += 1
-                row += 1
-        
-        ws_bid.column_dimensions['A'].width = 40
-        ws_bid.column_dimensions['B'].width = 60
-        ws_bid.column_dimensions['C'].width = 30
-
-    # TEMPLATES SHEET - IMPROVED
+    # TEMPLATES SHEET
     if templates:
-        ws_templates = wb.create_sheet("Document Templates")
+        ws_templates = wb.create_sheet("Templates")
         row = 1
 
-        ws_templates[f'A{row}'] = "REQUIRED DOCUMENT TEMPLATES"
+        ws_templates[f'A{row}'] = "REQUIRED TEMPLATES"
         ws_templates[f'A{row}'].font = title_font
-        ws_templates.merge_cells(f'A{row}:E{row}')
+        ws_templates.merge_cells(f'A{row}:D{row}')
         row += 2
 
         # Headers
-        headers = ['Template Name', 'Category', 'Format', 'Mandatory', 'Description']
+        headers = ['Template Name', 'Category', 'Format', 'Mandatory']
         for col, header in enumerate(headers, start=1):
             cell = ws_templates.cell(row=row, column=col, value=header)
             cell.font = header_font
             cell.fill = header_fill
             cell.alignment = Alignment(horizontal='center')
-            cell.border = border
         row += 1
 
-        # Data from templates object
+        # Data
         categories = [
             ('Bid Submission Forms', templates.bid_submission_forms or []),
             ('Financial Formats', templates.financial_formats or []),
@@ -1286,32 +1003,20 @@ def generate_excel_report(analysis, rfp_sections, templates):
             for template in items:
                 ws_templates[f'A{row}'] = template.name
                 ws_templates[f'B{row}'] = category_name
-                ws_templates[f'C{row}'] = template.format.upper() if template.format else 'N/A'
+                ws_templates[f'C{row}'] = template.format.upper()
                 ws_templates[f'D{row}'] = 'Yes' if template.mandatory else 'No'
-                ws_templates[f'E{row}'] = template.description or ''
-                
-                for col in range(1, 6):
-                    cell = ws_templates.cell(row=row, column=col)
-                    cell.border = border
-                    cell.alignment = Alignment(wrap_text=True, vertical='top')
-                
-                # Highlight mandatory templates
-                if template.mandatory:
-                    ws_templates.cell(row=row, column=4).fill = PatternFill(start_color="FFFFCC", end_color="FFFFCC", fill_type="solid")
-                
                 row += 1
 
-        ws_templates.column_dimensions['A'].width = 45
+        ws_templates.column_dimensions['A'].width = 50
         ws_templates.column_dimensions['B'].width = 25
-        ws_templates.column_dimensions['C'].width = 12
-        ws_templates.column_dimensions['D'].width = 12
-        ws_templates.column_dimensions['E'].width = 60
+        ws_templates.column_dimensions['C'].width = 15
+        ws_templates.column_dimensions['D'].width = 15
 
     buffer = io.BytesIO()
     wb.save(buffer)
     buffer.seek(0)
     
-    filename = f"Tender_Analysis_{analysis.tender_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    filename = f"Tender_Analysis_{analysis.tender_id}_{datetime.now().strftime('%Y%m%d')}.xlsx"
     return buffer.getvalue(), filename, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 

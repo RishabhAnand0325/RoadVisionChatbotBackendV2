@@ -77,3 +77,6 @@ class DocumentRepository:
             self.db.delete(document)
         
         self.db.commit()
+
+    def get_by_hash(self, file_hash: str) -> Optional[Document]:
+        return self.db.query(Document).filter(Document.file_hash == file_hash).first()

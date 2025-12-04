@@ -1,13 +1,48 @@
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 from typing import Optional, List
 from uuid import UUID
 from datetime import datetime
 from enum import Enum
+from dateutil import parser as date_parser
 
 from app.modules.analyze.db.schema import AnalysisStatusEnum, TenderAnalysis
 from app.modules.analyze.models.pydantic_models import DataSheetSchema, OnePagerSchema, ScopeOfWorkSchema
 from app.modules.scraper.db.schema import ScrapedTender
 from app.modules.tenderiq.db.schema import TenderActionEnum
+
+
+# ==================== Date Normalization Utility ====================
+def normalize_date(date_str: Optional[str]) -> Optional[str]:
+    """
+    Normalize any date string format to ISO format (YYYY-MM-DD).
+    Handles multiple formats: DD-MM-YYYY, DD-Mon-YYYY, YYYY-MM-DD, etc.
+    Returns None if date cannot be parsed.
+    """
+    if not date_str or not isinstance(date_str, str):
+        return None
+    
+    date_str = date_str.strip()
+    if not date_str:
+        return None
+    
+    try:
+        # First, check if it's already in ISO format (YYYY-MM-DD)
+        if len(date_str) == 10 and date_str.count('-') == 2:
+            parts = date_str.split('-')
+            if all(p.isdigit() for p in parts):
+                year, month, day = int(parts[0]), int(parts[1]), int(parts[2])
+                # ISO format: year should be 1900-2100, month 1-12, day 1-31
+                if 1900 <= year <= 2100 and 1 <= month <= 12 and 1 <= day <= 31:
+                    # Already in ISO format, return as-is
+                    return date_str
+                # Otherwise fall through to dateutil parsing
+        
+        # Try to parse with dateutil which handles many formats
+        # Use dayfirst=True for DD-MM-YYYY formats
+        parsed_date = date_parser.parse(date_str, dayfirst=True)
+        return parsed_date.strftime("%Y-%m-%d")
+    except (ValueError, TypeError):
+        return None
 
 
 # ==================== Tender Models ====================
@@ -33,7 +68,7 @@ class Tender(BaseModel):
     city: str
     summary: str
     value: str
-    due_date: str
+    due_date: Optional[str] = None
     tdr: Optional[str] = None
     tendering_authority: Optional[str] = None
     tender_no: Optional[str] = None
@@ -56,13 +91,39 @@ class Tender(BaseModel):
     information_source: Optional[str] = None
     files: list[TenderFile]
     dms_folder_id: Optional[UUID] = None
-    
-    # Action flags - These are from the tenders table, not scraped_tenders
-    is_favorite: Optional[bool] = False
-    is_wishlisted: Optional[bool] = False
-    is_archived: Optional[bool] = False
 
     model_config = ConfigDict(from_attributes=True)
+
+    @field_validator("publish_date", "due_date", "last_date_of_bid_submission", "tender_opening_date", mode="before")
+    @classmethod
+    def normalize_dates(cls, v: Optional[str]) -> Optional[str]:
+        """Normalize all date fields to ISO format (YYYY-MM-DD)."""
+        return normalize_date(v)
+
+    @model_validator(mode="after")
+    def fix_illogical_dates(self):
+        """
+        Fix illogical date combinations from scraper.
+        If due_date is before publish_date, use last_date_of_bid_submission instead.
+        """
+        if self.publish_date and self.due_date:
+            try:
+                pub_date = datetime.strptime(self.publish_date, "%Y-%m-%d")
+                due_date = datetime.strptime(self.due_date, "%Y-%m-%d")
+                
+                # If due_date is before publish_date, it's illogical
+                if due_date < pub_date:
+                    # Use last_date_of_bid_submission as the actual due date
+                    if self.last_date_of_bid_submission:
+                        self.due_date = self.last_date_of_bid_submission
+                    # If that's also invalid, use tender_opening_date
+                    elif self.tender_opening_date:
+                        self.due_date = self.tender_opening_date
+            except (ValueError, TypeError):
+                pass  # If dates can't be parsed, leave them as-is
+        
+        return self
+
 
 class TenderCreate(BaseModel):
     tender_title: str
@@ -159,14 +220,6 @@ class ScrapedTenderRead(BaseModel):
 
     # TenderDetailOtherDetail
     information_source: str
-    # Extra fields merged from Tender table for wishlist/export
-    length_km: Optional[float] = None
-    per_km_cost: Optional[float] = None
-    span_length: Optional[float] = None
-    road_work_amount: Optional[float] = None
-    structure_work_amount: Optional[float] = None
-    remarks: Optional[str] = None
-    current_status: Optional[str] = None
     class Config:
         from_attributes = True
 
@@ -191,7 +244,7 @@ class TenderAnalysisRead(BaseModel):
     # Timestamps
     created_at: datetime
     updated_at: datetime
-    analysis_started_at: Optional[datetime] = None
+    analysis_started_at: datetime
     analysis_completed_at: Optional[datetime] = None
     
     # Analysis Results - JSON columns (untyped to avoid circular imports)
@@ -265,8 +318,8 @@ class TenderHistoryType(str, Enum):
     OTHER = "other"
 
 class TenderHistoryDateChange(BaseModel):
-    from_date: str
-    to_date: str
+    from_date: Optional[str] = None
+    to_date: Optional[str] = None
 
 class TenderHistoryItem(BaseModel):
     id: str
@@ -375,6 +428,36 @@ class FullTenderDetails(BaseModel):
     tender_history: List[TenderHistoryItem]
     model_config = ConfigDict(from_attributes=True)
 
+    @field_validator("publish_date", "due_date", "last_date_of_bid_submission", "tender_opening_date", mode="before")
+    @classmethod
+    def normalize_dates_full(cls, v: Optional[str]) -> Optional[str]:
+        """Normalize all date fields to ISO format (YYYY-MM-DD)."""
+        return normalize_date(v)
+
+    @model_validator(mode="after")
+    def fix_illogical_dates_full(self):
+        """
+        Fix illogical date combinations from scraper.
+        If due_date is before publish_date, use last_date_of_bid_submission instead.
+        """
+        if self.publish_date and self.due_date:
+            try:
+                pub_date = datetime.strptime(self.publish_date, "%Y-%m-%d")
+                due_date = datetime.strptime(self.due_date, "%Y-%m-%d")
+                
+                # If due_date is before publish_date, it's illogical
+                if due_date < pub_date:
+                    # Use last_date_of_bid_submission as the actual due date
+                    if self.last_date_of_bid_submission:
+                        self.due_date = self.last_date_of_bid_submission
+                    # If that's also invalid, use tender_opening_date
+                    elif self.tender_opening_date:
+                        self.due_date = self.tender_opening_date
+            except (ValueError, TypeError):
+                pass  # If dates can't be parsed, leave them as-is
+        
+        return self
+
 # ==================== Response Models - Analysis Metadata ====================
 
 class ScrapedDate(BaseModel):
@@ -426,9 +509,16 @@ class ScrapedDatesResponse(BaseModel):
 class ScrapedTenderQuery(BaseModel):
     id: UUID
     query_name: str
-    number_of_tenders: str
     tenders: list[Tender]
     model_config = ConfigDict(from_attributes=True)
+    
+    @field_validator('query_name', mode='before')
+    @classmethod
+    def strip_query_name(cls, v):
+        """Strip whitespace from query_name to fix malformed names with newlines."""
+        if isinstance(v, str):
+            return v.strip()
+        return v
 
 
 class DailyTendersResponse(BaseModel):

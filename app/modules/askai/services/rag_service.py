@@ -3,7 +3,7 @@ from typing import Dict, List
 from sqlalchemy.orm import Session
 from datetime import datetime
 
-from app.core.services import llm_model, vector_store
+from app.core.services import get_llm_client, get_vector_store, GEMINI_MODEL_NAME
 from app.modules.askai.db.repository import ChatRepository
 from app.config import settings
 
@@ -20,6 +20,7 @@ def send_message_to_chat(db: Session, chat_id: UUID, user_message: str) -> Dict:
     sources = []
     
     if chat_docs:
+        vector_store = get_vector_store()
         collection = vector_store.get_or_create_collection(str(chat_id))
         results = vector_store.query(collection, user_message, n_results=settings.RAG_TOP_K)
         
@@ -75,7 +76,11 @@ that you are using information from other sources and not the context
     gemini_history.append({"role": "user", "parts": [{"text": prompt}]})
     
     try:
-        response = llm_model.generate_content(gemini_history)
+        client = get_llm_client()
+        response = client.models.generate_content(
+            model=GEMINI_MODEL_NAME,
+            contents=gemini_history
+        )
         bot_response = response.text if hasattr(response, "text") else "I couldn't generate a response."
     except Exception as api_error:
         print(f"❌ Gemini API error: {api_error}")
@@ -91,7 +96,10 @@ that you are using information from other sources and not the context
     if is_first_message:
         try:
             title_prompt = f"Generate ONE short, concise title (4-5 words, NO extra text, straight to the title) for the following conversation: \n\nUser: {user_message}\n\nAssistant: {bot_response}"
-            title_response = llm_model.generate_content(title_prompt)
+            title_response = client.models.generate_content(
+                model=GEMINI_MODEL_NAME,
+                contents=title_prompt
+            )
             new_title = title_response.text.strip().replace('"', '')
             if new_title:
                 chat_repo.rename(chat, new_title)

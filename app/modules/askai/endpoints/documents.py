@@ -123,7 +123,7 @@ def _get_chat_docs_data(chat_id: uuid.UUID, db: Session) -> dict:
         total_docs=len(pdfs) + len(excel) + len(processing_jobs),
         chat_id=str(chat_id)
     )
-    return response_data.model_dump()
+    return response_data.model_dump(mode='json')
 
 @router.get("/chats/{chat_id}/docs", response_model=ChatDocumentsResponse, tags=["AskAI - Documents"])
 def get_chat_docs(chat_id: uuid.UUID, db: Session = Depends(get_db_session)):

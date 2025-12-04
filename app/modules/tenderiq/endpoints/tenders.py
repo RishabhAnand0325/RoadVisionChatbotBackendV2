@@ -1,9 +1,8 @@
 from click import Option
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
-from typing import Optional
+from typing import Optional, Literal
 from uuid import UUID
-import logging
 
 from app.db.database import get_db_session
 from app.modules.auth.services.auth_service import get_current_active_user
@@ -17,15 +16,15 @@ from app.modules.tenderiq.models.pydantic_models import (
     Tender,
     FilteredTendersResponse,
     TenderActionRequest,
-    TenderActionType,
+    HistoryData,
 )
 from app.modules.tenderiq.services import tender_service
 from app.modules.tenderiq.services.tender_filter_service import TenderFilterService
 from app.modules.tenderiq.services.tender_action_service import TenderActionService
+from app.modules.tenderiq.db.repository import TenderWishlistRepository
 from sse_starlette.sse import EventSourceResponse
 from app.modules.tenderiq.services import tender_service_sse
 
-logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -47,13 +46,47 @@ def get_daily_tenders(db: Session = Depends(get_db_session)):
     Retrieves the most recent batch of tenders added by the scraper.
     This represents the latest daily scrape run.
     """
-    latest_tenders = tender_service.get_latest_daily_tenders(db)
+    latest_tenders = tender_service.get_daily_tenders(db)
     if not latest_tenders:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="No scraped tenders found in the database.",
         )
     return latest_tenders
+
+@router.get(
+    "/tenders",
+    tags=["TenderIQ"],
+    summary="Get tenders with optional filters (replaces /dailytenders)"
+)
+def get_tenders(
+    date: Optional[str] = Query(None, description="Specific date in YYYY-MM-DD format"),
+    date_range: Optional[str] = Query(None, description="Range like 'last_5_days'"),
+    include_all_dates: bool = Query(False, description="Include all historical tenders"),
+    category: Optional[str] = Query(None, description="Filter by category"),
+    location: Optional[str] = Query(None, description="Filter by location"),
+    min_value: Optional[float] = Query(None, description="Minimum tender value in crore"),
+    max_value: Optional[float] = Query(None, description="Maximum tender value in crore"),
+    db: Session = Depends(get_db_session)
+):
+    """
+    Get tenders with optional filters.
+    If no filters are provided, returns the latest daily tenders.
+    """
+    service = TenderFilterService()
+    
+    if date:
+        return service.get_tenders_by_specific_date(
+            db, date, category, location, None, None, min_value, max_value
+        )
+    elif date_range:
+        return service.get_tenders_by_date_range(
+            db, date_range, category, location, None, None, min_value, max_value
+        )
+    elif include_all_dates:
+        return service.get_all_tenders(db, category, location, None, None, min_value, max_value)
+    else:
+        return tender_service.get_daily_tenders(db)
 
 @router.get(
     "/tenders-sse",
@@ -65,9 +98,12 @@ def get_daily_tenders_sse(
     start: Optional[int] = 0,
     end: Optional[int] = 1000,
     scrape_run_id: Optional[str] = None,
+    date_range: Optional[str] = None,
     db: Session = Depends(get_db_session)
 ):
-    return EventSourceResponse(tender_service_sse.get_daily_tenders_sse(db, start, end, scrape_run_id))
+    # If date_range is provided, use it as scrape_run_id
+    run_id = date_range if date_range else scrape_run_id
+    return EventSourceResponse(tender_service_sse.get_daily_tenders_sse(db, start, end, run_id))
 
 @router.get(
     "/tenders/{tender_id}",
@@ -130,45 +166,97 @@ def get_full_tender_details(
     "/wishlist",
     response_model=list[Tender],
     tags=["TenderIQ"],
-    summary="Get all wishlisted tenders"
+    summary="Get all wishlisted tenders for the current user"
 )
-def get_wishlisted_tenders(db: Session = Depends(get_db_session)):
-    """Retrieves all tenders that have been marked as wishlisted."""
+def get_wishlisted_tenders(
+    db: Session = Depends(get_db_session),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Retrieves all tenders that have been marked as wishlisted by the current user."""
     service = TenderFilterService()
-    return service.get_wishlisted_tenders(db)
+    return service.get_wishlisted_tenders(db, current_user.id)
+
+@router.patch(
+    "/wishlist/{wishlist_id}/results/{results}",
+    tags=["TenderIQ"],
+    summary="Update the results status of a wishlisted tender",
+    status_code=status.HTTP_200_OK,
+)
+def update_wishlist_tender_results(
+    wishlist_id: str,
+    results: Literal["won", "rejected", "incomplete", "pending"],
+    db: Session = Depends(get_db_session),
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    Update the results status of a wishlisted tender.
+    
+    **Available Results:**
+    - `won`: Tender was successfully won
+    - `rejected`: Tender was rejected
+    - `incomplete`: Tender submission was incomplete
+    - `pending`: Tender results are still pending
+    """
+    try:
+        wishlist_repo = TenderWishlistRepository(db)
+        updated_wishlist = wishlist_repo.update_wishlist_progress(wishlist_id, results=results)
+        
+        if not updated_wishlist:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Wishlist item not found"
+            )
+        
+        return {"message": "Wishlist tender results updated successfully", "wishlist_id": wishlist_id, "results": results}
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update wishlist tender results: {str(e)}"
+        )
 
 @router.get(
     "/history-wishlist",
     response_model=HistoryAndWishlistResponse,
     tags=["TenderIQ"],
-    summary="Get all wishlisted tenders along with actions history"
+    summary="Get all wishlisted tenders along with actions history for the current user"
 )
-def get_wishlisted_tenders_with_history(db: Session = Depends(get_db_session)):
-    """Retrieves all tenders that have been marked as wishlisted."""
+def get_wishlisted_tenders_with_history(
+    db: Session = Depends(get_db_session),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Retrieves all tenders that have been marked as wishlisted by the current user."""
     service = TenderFilterService()
-    return service.get_wishlisted_tenders_with_history(db)
+    return service.get_wishlisted_tenders_with_history(db, current_user.id)
 
 @router.get(
     "/favourite",
     response_model=list[Tender],
     tags=["TenderIQ"],
-    summary="Get all favorite tenders"
+    summary="Get all favorite tenders for the current user"
 )
-def get_favorite_tenders(db: Session = Depends(get_db_session)):
-    """Retrieves all tenders that have been marked as favorites."""
+def get_favorite_tenders(
+    db: Session = Depends(get_db_session),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Retrieves all tenders that have been marked as favorites by the current user."""
     service = TenderFilterService()
-    return service.get_favorited_tenders(db)
+    return service.get_favorited_tenders(db, current_user.id)
 
 @router.get(
     "/archived",
     response_model=list[Tender],
     tags=["TenderIQ"],
-    summary="Get all archived tenders"
+    summary="Get all archived tenders for the current user"
 )
-def get_archived_tenders(db: Session = Depends(get_db_session)):
-    """Retrieves all tenders that have been archived."""
+def get_archived_tenders(
+    db: Session = Depends(get_db_session),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Retrieves all tenders that have been archived by the current user."""
     service = TenderFilterService()
-    return service.get_archived_tenders(db)
+    return service.get_archived_tenders(db, current_user.id)
 
 @router.post(
     "/tenders/{tender_id}/actions",
@@ -194,71 +282,14 @@ def perform_tender_action(
     """
     try:
         service = TenderActionService(db)
-        updated_tender, tender_ref = service.perform_action(tender_id, current_user.id, request)
-        
-        response = {
-            "message": "Action performed successfully",
-            "tender_id": str(tender_id),
-            "is_wishlisted": getattr(updated_tender, 'is_wishlisted', False),
-            "is_favorite": getattr(updated_tender, 'is_favorite', False),
-            "is_archived": getattr(updated_tender, 'is_archived', False),
-        }
-        
-        # If tender was just wishlisted, include analysis queue info
-        if request.action == TenderActionType.TOGGLE_WISHLIST and getattr(updated_tender, 'is_wishlisted', False):
-            try:
-                from app.modules.analyze.services.analysis_queue_service import AnalysisQueueService
-                from app.modules.analyze.db.schema import TenderAnalysis, AnalysisStatusEnum
-                
-                if tender_ref:
-                    # First check if analysis already completed
-                    existing_analysis = db.query(TenderAnalysis).filter(
-                        TenderAnalysis.tender_id == tender_ref
-                    ).first()
-                    
-                    if existing_analysis and existing_analysis.status == AnalysisStatusEnum.completed:
-                        # Analysis already exists and completed
-                        response["analysis_queued"] = False
-                        response["analysis_completed"] = True
-                        response["message"] = "Added to wishlist. Analysis already completed."
-                    else:
-                        # Check queue status
-                        queue_status = AnalysisQueueService.get_queue_status(db)
-                        position = AnalysisQueueService.get_tender_queue_position(db, tender_ref)
-                        
-                        response["analysis_queued"] = position is not None
-                        response["analysis_completed"] = False
-                        response["queue_position"] = position
-                        response["queue_total"] = queue_status.get("queue_length", 0)
-                        response["has_active_analysis"] = queue_status.get("has_active", False)
-                        
-                        # Determine message for user
-                        if queue_status.get("has_active"):
-                            if position == 1:
-                                response["message"] = "Added to wishlist. Analysis will start after current one completes (~5 min)."
-                            elif position and position > 1:
-                                response["message"] = f"Added to wishlist. In analysis queue at position {position}."
-                            else:
-                                response["message"] = "Added to wishlist. Analysis queued."
-                        else:
-                            response["message"] = "Added to wishlist. Analysis starting now (~5 min)."
-                else:
-                    response["analysis_queued"] = False
-                    response["analysis_completed"] = False
-            except Exception as e:
-                # Don't fail the action if we can't get queue status
-                logger.warning(f"Failed to get analysis queue status: {e}", exc_info=True)
-                response["analysis_queued"] = False
-                response["analysis_completed"] = False
-        
-        return response
+        service.perform_action(tender_id, current_user.id, request)
+        return {"message": "Action performed successfully", "tender_id": str(tender_id)}
     except HTTPException as e:
         raise e
     except Exception as e:
-        logger.error(f"Error performing tender action: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"An unexpected error occurred: {str(e)}",
+            detail=f"An unexpected error occurred: {e}",
         )
 
 

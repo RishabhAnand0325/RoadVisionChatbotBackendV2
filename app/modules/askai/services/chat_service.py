@@ -3,7 +3,7 @@ from typing import List, Optional, Tuple
 from fastapi import BackgroundTasks
 from sqlalchemy.orm import Session
 
-from app.core.services import vector_store
+from app.core.services import get_vector_store
 from app.modules.askai.models.chat import ChatMetadata, Message, CreateNewChatRequest, DocumentMetadata
 from app.modules.askai.db.repository import ChatRepository, DocumentRepository
 from app.modules.askai.services.drive_service import download_files_from_drive
@@ -70,7 +70,15 @@ def delete_chat_by_id(db: Session, chat_id: UUID) -> bool:
         return False
     
     chat_repo.delete(chat)
-    vector_store.delete_collection(str(chat_id))
+    
+    # Try to delete from vector store if it's available
+    vs = get_vector_store()
+    if vs is not None:
+        try:
+            vs.delete_collection(str(chat_id))
+        except Exception as e:
+            print(f"Warning: Failed to delete vector store collection for chat {chat_id}: {e}")
+    
     return True
 
 def rename_chat_by_id(db: Session, chat_id: UUID, new_title: str) -> bool:

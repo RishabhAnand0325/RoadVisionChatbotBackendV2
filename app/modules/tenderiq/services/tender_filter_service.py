@@ -11,14 +11,21 @@ This service handles business logic for:
 """
 
 import re
+import logging
 from typing import List, Optional
 from uuid import UUID
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
+from sqlalchemy import desc
+from dateutil import parser as date_parser
+
+logger = logging.getLogger(__name__)
 
 from app.modules.analyze.db.schema import AnalysisStatusEnum
-from app.modules.tenderiq.db.repository import TenderRepository
+from app.modules.tenderiq.db.repository import TenderRepository, TenderWishlistRepository
 from app.modules.tenderiq.db.tenderiq_repository import TenderIQRepository
+from app.modules.scraper.db.schema import ScrapedTender
+from app.modules.tenderiq.db.schema import TenderActionHistory, TenderActionEnum, Tender as TenderModel
 from app.modules.tenderiq.models.pydantic_models import (
     AvailableDatesResponse,
     FilteredTendersResponse,
@@ -26,6 +33,7 @@ from app.modules.tenderiq.models.pydantic_models import (
     HistoryData,
     HistoryDataResultsEnum,
     ScrapeDateInfo,
+    ScrapedTenderRead,
     ScrapedTenderRead,
     Tender,
     DailyTendersResponse,
@@ -36,6 +44,40 @@ from app.modules.tenderiq.repositories import analysis as analysis_repo
 from app.modules.tenderiq.repositories import repository as tender_repo
 
 
+def normalize_date_format(date_str: Optional[str]) -> str:
+    """
+    Converts various date formats to a standard ISO-like format (YYYY-MM-DD).
+    Handles: DD-MM-YYYY, DD/MM/YYYY, DD-Mon-YYYY, ISO formats, and others.
+    Returns empty string if date cannot be parsed.
+    """
+    if not date_str or not isinstance(date_str, str):
+        return ""
+    
+    date_str = date_str.strip()
+    if not date_str:
+        return ""
+    
+    try:
+        # First, try explicit DD-MM-YYYY format (most common in India)
+        if len(date_str) == 10 and date_str.count('-') == 2:
+            parts = date_str.split('-')
+            if all(p.isdigit() for p in parts):
+                day, month, year = int(parts[0]), int(parts[1]), int(parts[2])
+                if 1 <= day <= 31 and 1 <= month <= 12 and 1900 <= year <= 2100:
+                    from datetime import datetime as dt
+                    parsed_date = dt(year, month, day)
+                    return parsed_date.strftime("%Y-%m-%d")
+        
+        # Try dateutil parser for flexible parsing
+        parsed_date = date_parser.parse(date_str, dayfirst=True)
+        return parsed_date.strftime("%Y-%m-%d")
+    except Exception:
+        pass
+    
+    # If all parsing fails, return the original string (frontend will handle it)
+    return date_str
+
+
 class TenderFilterService:
     """Service for filtering and retrieving tenders by date and other criteria"""
 
@@ -43,135 +85,129 @@ class TenderFilterService:
         """Initialize the service"""
         pass
 
-    def get_wishlisted_tenders_with_history(self, db: Session) -> HistoryAndWishlistResponse:
+    def get_wishlisted_tenders_with_history(self, db: Session, user_id: UUID) -> HistoryAndWishlistResponse:
         """
-        Get wishlisted tenders with history.
+        Get wishlisted tenders with history for a specific user.
+        Deduplicates entries to ensure each tender appears only once.
         """
-        repo = TenderIQRepository(db)
-        wishlist = repo.get_wishlisted_tenders()
+        wishlist_repo = TenderWishlistRepository(db)
+        user_wishlist = wishlist_repo.get_user_wishlist(user_id)
         history_data_list: List[HistoryData] = []
+        
+        # Additional deduplication by tender_ref_number to ensure uniqueness
+        seen_tender_refs = set()
+        repo = TenderIQRepository(db)
 
-        for tender in wishlist:
-            tenders_table = tender.tuple()[0]
-            scraped_tender_table = tender.tuple()[1]
-            analysis = analysis_repo.get_analysis_data(db, str(tenders_table.tender_ref_number))
+        for wishlist_entry in user_wishlist:
+            tender_ref = wishlist_entry.tender_ref_number
             
-            # Build full_scraped_details by merging scraped_tender_table and Tender table extras
-            full_scraped = None
-            if scraped_tender_table:
-                # start with scraped model dict
-                try:
-                    scraped_dict = ScrapedTenderRead.model_validate(scraped_tender_table).model_dump()
-                except Exception:
-                    # fallback: shallow attribute extraction
-                    scraped_dict = {k: getattr(scraped_tender_table, k, None) for k in dir(scraped_tender_table) if not k.startswith('_')}
-
-                # Extract engineering metrics from analysis or tender table
-                length_km = None
-                road_work_amount = None
-                structure_work_amount = None
-                span_length = None
+            # Skip if we've already processed this tender_ref_number
+            if tender_ref in seen_tender_refs:
+                continue
+            seen_tender_refs.add(tender_ref)
+            
+            # Get the tender and scraped tender data
+            tender = db.query(TenderModel).filter(TenderModel.tender_ref_number == tender_ref).first()
+            
+            # Get the most recent ScrapedTender from the last 7 days
+            # This ensures consistency with what the Live Tenders page shows
+            from app.modules.scraper.db.schema import ScrapeRun, ScrapedTenderQuery
+            from datetime import timezone
+            
+            seven_days_ago = datetime.now(timezone.utc) - timedelta(days=7)
+            scraped_tender = db.query(ScrapedTender).join(
+                ScrapedTenderQuery, ScrapedTender.query_id == ScrapedTenderQuery.id, isouter=True
+            ).join(
+                ScrapeRun, ScrapedTenderQuery.scrape_run_id == ScrapeRun.id, isouter=True
+            ).filter(
+                ScrapedTender.tender_id_str == tender_ref,
+                ScrapeRun.run_at >= seven_days_ago
+            ).order_by(
+                desc(ScrapeRun.run_at)
+            ).first()
+            
+            # If no recent scrape found, fall back to finding any scraped tender
+            if not scraped_tender:
+                scraped_tender = db.query(ScrapedTender).filter(
+                    ScrapedTender.tender_id_str == tender_ref
+                ).order_by(
+                    desc(ScrapedTender.id)  # Order by ID as fallback
+                ).first()
+            
+            if not tender:
+                logger.warning(f"Tender not found for tender_ref: {tender_ref}, skipping...")
+                continue
                 
-                # FIRST PRIORITY: Try to extract from analysis scope_of_work_json project_details
-                if analysis and analysis.scope_of_work_json:
-                    try:
-                        scope = analysis.scope_of_work_json
-                        if isinstance(scope, dict) and 'project_details' in scope:
-                            details = scope['project_details']
-                            if isinstance(details, dict):
-                                # Get numeric fields directly (new AI-extracted values)
-                                length_km = details.get('road_length_km') or details.get('total_length_km')
-                                span_length = details.get('span_length_m')
-                                road_work_amount = details.get('road_work_value_cr')
-                                structure_work_amount = details.get('structure_work_value_cr')
-                                
-                                # If not found in numeric fields, try parsing from text fields
-                                if not length_km:
-                                    total_length_str = details.get('total_length', '')
-                                    if total_length_str and 'km' in str(total_length_str).lower():
-                                        import re
-                                        match = re.search(r'([\d.,]+)\s*km', str(total_length_str), re.IGNORECASE)
-                                        if match:
-                                            length_km = float(match.group(1).replace(',', ''))
-                    except Exception as e:
-                        print(f"Error extracting from scope_of_work: {e}")
-
-                # Fallback to Tender table if analysis didn't have these values
-                if length_km is None:
-                    length_km = float(tenders_table.length_km) if getattr(tenders_table, 'length_km', None) is not None else None
-                if span_length is None:
-                    span_length = float(tenders_table.span_length) if getattr(tenders_table, 'span_length', None) is not None else None
-                if road_work_amount is None:
-                    road_work_amount = float(tenders_table.road_work_amount) if getattr(tenders_table, 'road_work_amount', None) is not None else None
-                if structure_work_amount is None:
-                    structure_work_amount = float(tenders_table.structure_work_amount) if getattr(tenders_table, 'structure_work_amount', None) is not None else None
-                
-                # Calculate per_km_cost if we have length and value
-                per_km_cost = None
-                if length_km and length_km > 0:
-                    try:
-                        value_float = self._convert_word_currency_to_number(str(scraped_tender_table.value))
-                        if value_float > 0:
-                            per_km_cost = value_float / length_km
-                    except Exception:
-                        pass
-
-                # add Tender table extra fields
-                remarks_text = None
-                if getattr(tenders_table, 'description', None):
-                    remarks_text = str(tenders_table.description).strip()
-                elif scraped_tender_table and hasattr(scraped_tender_table, 'tender_brief'):
-                    remarks_text = str(scraped_tender_table.tender_brief).strip()
-                
-                # Clean up remarks - remove TDR prefix and clean text
-                if remarks_text:
-                    import re
-                    # Remove "TDR:12345 tender for" pattern at the start
-                    remarks_text = re.sub(r'^TDR:\d+\s+(?:tender for\s+)?', '', remarks_text, flags=re.IGNORECASE)
-                    # Remove extra whitespace
-                    remarks_text = ' '.join(remarks_text.split())
-                    # Capitalize first letter
-                    if remarks_text:
-                        remarks_text = remarks_text[0].upper() + remarks_text[1:] if len(remarks_text) > 1 else remarks_text.upper()
-                
-                # Format status nicely
-                status_val = getattr(tenders_table, 'review_status', None) or getattr(tenders_table, 'status', None)
-                current_status = str(status_val).replace('_', ' ').title() if status_val else "Not Reviewed"
-                
-                scraped_dict.update({
-                    "length_km": length_km,
-                    "per_km_cost": per_km_cost,
-                    "span_length": span_length,
-                    "road_work_amount": road_work_amount,
-                    "structure_work_amount": structure_work_amount,
-                    "remarks": remarks_text,
-                    "current_status": current_status
-                })
-
-                try:
-                    full_scraped = ScrapedTenderRead.model_validate(scraped_dict)
-                except Exception:
-                    full_scraped = None
-
-            # Create history data for all wishlisted tenders (with or without analysis)
+            analysis = analysis_repo.get_analysis_data(db, tender_ref)
+            
+            # Sync analysis progress to wishlist if analysis exists and is more up-to-date
             if analysis is not None:
-                print(analysis.progress, analysis.tender_id)
+                from app.modules.analyze.db.schema import AnalysisStatusEnum
+                analysis_complete = analysis.status == AnalysisStatusEnum.completed
+                analysis_progress = analysis.progress or 0
                 
+                # Update wishlist if analysis progress is more recent or analysis is complete
+                if (analysis_progress > wishlist_entry.progress) or (analysis_complete and not wishlist_entry.analysis_state):
+                    try:
+                        wishlist_repo.update_wishlist_progress(
+                            wishlist_entry.id,
+                            progress=analysis_progress,
+                            analysis_state=analysis_complete,
+                            status_message=analysis.status_message or wishlist_entry.status_message
+                        )
+                        # Refresh wishlist entry to get updated values
+                        db.refresh(wishlist_entry)
+                    except Exception as e:
+                        logger.warning(f"Failed to sync analysis progress to wishlist {wishlist_entry.id}: {e}")
+            
+            # Use wishlist entry data or fallback to tender data
+            title = wishlist_entry.title or tender.tender_title or ''
+            authority = wishlist_entry.authority or tender.employer_name or ''
+            value = wishlist_entry.value or (float(tender.estimated_cost) if tender.estimated_cost else 0)
+            emd = wishlist_entry.emd or (float(tender.bid_security) if tender.bid_security else 0)
+            due_date = wishlist_entry.due_date or ''
+            category = wishlist_entry.category or tender.category or ''
+            
+            if scraped_tender:
+                value = self._convert_word_currency_to_number(str(scraped_tender.value)) if scraped_tender.value else value
+                emd = self._convert_word_currency_to_number(str(scraped_tender.emd)) if scraped_tender.emd else emd
+                due_date = str(scraped_tender.due_date) if scraped_tender.due_date else due_date
+            
+            # Determine analysis_state: use wishlist entry's analysis_state, or derive from analysis status
+            from app.modules.analyze.db.schema import AnalysisStatusEnum
+            if wishlist_entry.analysis_state:
+                analysis_state = AnalysisStatusEnum.completed
+            elif analysis:
+                analysis_state = analysis.status
+            else:
+                analysis_state = AnalysisStatusEnum.pending
+            
+            # Use tender.id (from Tender table - stable across all scrape runs)
+            # This avoids ID mismatches when user views old scrape runs but wishlist shows newer ones
+            # The TenderDetails endpoint can handle both Tender IDs and ScrapedTender IDs via dual lookup
+            tender_id = None
+            if tender and tender.id:
+                tender_id = str(tender.id)
+            
+            if not tender_id:
+                logger.warning(f"Failed to get valid tender ID for tender_ref {tender_ref}, skipping...")
+                continue
+            
             history_data = HistoryData(
-                id=str(scraped_tender_table.id),  # Use ScrapedTender ID (matches Tender ID after fix)
-                title=str(tenders_table.tender_title),
-                authority=str(tenders_table.employer_name),
-                value=int(self._convert_word_currency_to_number(str(scraped_tender_table.value))),
-                emd=int(self._convert_word_currency_to_number(str(scraped_tender_table.emd))),
-                due_date=str(scraped_tender_table.due_date),
-                category=str(tenders_table.category).strip().replace('\r\n', ' ').replace('\n', ' '),
-                progress=analysis.progress if analysis else 0,
-                analysis_state=analysis.status if analysis else AnalysisStatusEnum.failed,
-                synopsis_state=False,
-                evaluated_state=False,
-                results=HistoryDataResultsEnum.PENDING,
+                id=tender_id,
+                title=title,
+                authority=authority,
+                value=int(value),
+                emd=int(emd),
+                due_date=due_date,
+                category=category,
+                progress=wishlist_entry.progress if wishlist_entry.progress is not None else (analysis.progress if analysis else 0),
+                analysis_state=analysis_state,
+                synopsis_state=wishlist_entry.synopsis_state,
+                evaluated_state=wishlist_entry.evaluated_state,
+                results=HistoryDataResultsEnum(wishlist_entry.results) if wishlist_entry.results else HistoryDataResultsEnum.PENDING,
                 analysis_details=TenderAnalysisRead.model_validate(analysis) if analysis else None,
-                full_scraped_details=full_scraped
+                full_scraped_details=ScrapedTenderRead.model_validate(scraped_tender) if scraped_tender else None
             )
             history_data_list.append(history_data)
 
@@ -183,53 +219,137 @@ class TenderFilterService:
     def get_tender_details(self, db: Session, tender_id: UUID) -> Optional[Tender]:
         """
         Get full details for a single tender by its ID.
+        Supports both Tender IDs and ScrapedTender IDs for lookup.
+        
+        First tries to find the ID in ScrapedTender table (preferred),
+        then falls back to Tender table for stable IDs from wishlist.
         """
         repo = TenderIQRepository(db)
+        
+        # Try to get by ScrapedTender ID first (IDs from Live Tenders)
         tender = repo.get_tender_by_id(tender_id)
-        if not tender:
+        if tender:
+            # Normalize dates before returning
+            tender_dict = Tender.model_validate(tender).model_dump()
+            
+            # Normalize all date fields
+            date_fields = ["publish_date", "due_date", "last_date_of_bid_submission", "tender_opening_date"]
+            for field in date_fields:
+                if field in tender_dict and tender_dict[field]:
+                    tender_dict[field] = normalize_date_format(tender_dict[field])
+            
+            return Tender.model_validate(tender_dict)
+        
+        # Fallback: try to find by Tender ID (stable IDs from wishlist)
+        tender_obj = db.query(TenderModel).filter(TenderModel.id == tender_id).first()
+        if not tender_obj:
             return None
-        return tender
-
-    def _get_tenders_by_flag(self, db: Session, flag_name: str) -> list[Tender]:
-        """Helper to get all tenders where a specific boolean flag is set."""
-        scraped_tender_repo = TenderIQRepository(db)
         
-        # Use the new repository method that properly joins tables
-        # Returns list of tuples: (ScrapedTender, Tender)
-        tender_pairs = scraped_tender_repo.get_scraped_tenders_by_flag(flag_name, flag_value=True)
+        # If found by Tender ID, get the most recent ScrapedTender for display
+        # This ensures we show current data, not stale Tender data
+        scraped_tender = db.query(ScrapedTender).filter(
+            ScrapedTender.tender_id_str == tender_obj.tender_ref_number
+        ).order_by(
+            desc(ScrapedTender.created_at) if hasattr(ScrapedTender, 'created_at') else desc(ScrapedTender.id)
+        ).first()
         
-        result = []
-        for scraped_tender, tender_record in tender_pairs:
-            # Convert ScrapedTender to dict
+        if scraped_tender:
             tender_dict = Tender.model_validate(scraped_tender).model_dump()
-            
-            # Add the flags from the Tender table
-            if tender_record:
-                tender_dict['is_favorite'] = tender_record.is_favorite
-                tender_dict['is_wishlisted'] = tender_record.is_wishlisted
-                tender_dict['is_archived'] = tender_record.is_archived
-            else:
-                # Default to False if no tender record exists (shouldn't happen with inner join)
-                tender_dict['is_favorite'] = False
-                tender_dict['is_wishlisted'] = False
-                tender_dict['is_archived'] = False
-            
-            # Re-validate with the updated dict
-            result.append(Tender.model_validate(tender_dict))
+        else:
+            tender_dict = Tender.model_validate(tender_obj).model_dump()
         
-        return result
+        # Normalize all date fields
+        date_fields = ["publish_date", "due_date", "last_date_of_bid_submission", "tender_opening_date"]
+        for field in date_fields:
+            if field in tender_dict and tender_dict[field]:
+                tender_dict[field] = normalize_date_format(tender_dict[field])
+        
+        return Tender.model_validate(tender_dict)
 
-    def get_wishlisted_tenders(self, db: Session) -> list[Tender]:
-        """Gets all tenders that are wishlisted."""
-        return self._get_tenders_by_flag(db, 'is_wishlisted')
+    def _get_tenders_by_user_action(self, db: Session, user_id: UUID, positive_action: TenderActionEnum, negative_action: TenderActionEnum) -> list[Tender]:
+        """Helper to get all tenders where a user has performed a specific action (checking most recent action per tender)."""
+        from sqlalchemy import and_, func
+        
+        # Get all action history entries for this user and these action types
+        # We need to find the most recent action per tender for this user
+        subquery = (
+            db.query(
+                TenderActionHistory.tender_id,
+                func.max(TenderActionHistory.timestamp).label('max_timestamp')
+            )
+            .filter(
+                and_(
+                    TenderActionHistory.user_id == user_id,
+                    TenderActionHistory.action.in_([positive_action, negative_action])
+                )
+            )
+            .group_by(TenderActionHistory.tender_id)
+            .subquery()
+        )
+        
+        # Get the actual action history entries matching the most recent timestamps
+        action_histories = (
+            db.query(TenderActionHistory)
+            .join(
+                subquery,
+                and_(
+                    TenderActionHistory.tender_id == subquery.c.tender_id,
+                    TenderActionHistory.timestamp == subquery.c.max_timestamp
+                )
+            )
+            .filter(
+                and_(
+                    TenderActionHistory.user_id == user_id,
+                    TenderActionHistory.action == positive_action  # Only get tenders where most recent action is positive
+                )
+            )
+            .all()
+        )
+        
+        if not action_histories:
+            return []
+        
+        # Get unique tender IDs
+        tender_ids = list(set([h.tender_id for h in action_histories]))
+        
+        # Get the tenders
+        tenders = db.query(TenderModel).filter(TenderModel.id.in_(tender_ids)).all()
+        tender_ref_numbers = [t.tender_ref_number for t in tenders if t.tender_ref_number]
+        
+        if not tender_ref_numbers:
+            return []
+        
+        # Get scraped tenders
+        scraped_tender_repo = TenderIQRepository(db)
+        scraped_tenders = scraped_tender_repo.db.query(ScrapedTender).filter(
+            ScrapedTender.tender_id_str.in_(tender_ref_numbers)
+        ).all()
+        
+        return [Tender.model_validate(t) for t in scraped_tenders]
 
-    def get_archived_tenders(self, db: Session) -> list[Tender]:
-        """Gets all tenders that are archived."""
-        return self._get_tenders_by_flag(db, 'is_archived')
+    def get_wishlisted_tenders(self, db: Session, user_id: UUID) -> list[Tender]:
+        """Gets all tenders that are wishlisted by the specified user."""
+        wishlist_repo = TenderWishlistRepository(db)
+        user_wishlist = wishlist_repo.get_user_wishlist(user_id)
+        
+        if not user_wishlist:
+            return []
+        
+        tender_ref_numbers = [entry.tender_ref_number for entry in user_wishlist]
+        scraped_tender_repo = TenderIQRepository(db)
+        scraped_tenders = scraped_tender_repo.db.query(ScrapedTender).filter(
+            ScrapedTender.tender_id_str.in_(tender_ref_numbers)
+        ).all()
+        
+        return [Tender.model_validate(t) for t in scraped_tenders]
 
-    def get_favorited_tenders(self, db: Session) -> list[Tender]:
-        """Gets all tenders that are marked as favorite."""
-        return self._get_tenders_by_flag(db, 'is_favorite')
+    def get_archived_tenders(self, db: Session, user_id: UUID) -> list[Tender]:
+        """Gets all tenders that are archived by the specified user."""
+        return self._get_tenders_by_user_action(db, user_id, TenderActionEnum.archived, TenderActionEnum.unarchived)
+
+    def get_favorited_tenders(self, db: Session, user_id: UUID) -> list[Tender]:
+        """Gets all tenders that are marked as favorite by the specified user."""
+        return self._get_tenders_by_user_action(db, user_id, TenderActionEnum.favorited, TenderActionEnum.unfavorited)
 
     def get_available_dates(self, db: Session) -> AvailableDatesResponse:
         """
@@ -338,6 +458,7 @@ class TenderFilterService:
         """
         Get tenders from a relative date range (e.g., "last 5 days").
         Returns in DailyTendersResponse format (hierarchical by scrape run and query).
+        Aggregates tenders from ALL scrape runs in the date range.
 
         Args:
             db: SQLAlchemy database session
@@ -356,6 +477,7 @@ class TenderFilterService:
         # Map date range strings to days
         range_to_days = {
             "last_1_day": 1,
+            "last_2_days": 2,
             "last_5_days": 5,
             "last_7_days": 7,
             "last_30_days": 30,
@@ -370,24 +492,61 @@ class TenderFilterService:
         days = range_to_days[date_range]
         repo = TenderIQRepository(db)
 
-        # Get scrape runs and organize by hierarchical structure
+        # Get ALL scrape runs in the date range
         scrape_runs = repo.get_scrape_runs_by_date_range(days=days)
 
-        # Return the latest scrape run in the range (or combine if needed)
-        # For now, return the first (latest) one with all filters applied
-        if scrape_runs:
-            return self._scrape_run_to_daily_response(
-                scrape_runs[0],
-                category=category,
-                location=location,
-                state=state,
-                tender_type=tender_type,
-                min_value=min_value,
-                max_value=max_value,
-            )
+        if not scrape_runs:
+            raise ValueError(f"No tenders found for date range: {date_range}")
 
-        # Return empty response if no scrape runs found
-        raise ValueError(f"No tenders found for date range: {date_range}")
+        # Aggregate queries and tenders from ALL scrape runs
+        aggregated_queries = []
+        seen_query_ids = set()
+        
+        for scrape_run in scrape_runs:
+            for query in scrape_run.queries:
+                # Avoid duplicate queries from different runs
+                if query.id in seen_query_ids:
+                    continue
+                seen_query_ids.add(query.id)
+                
+                # Skip if category filter is specified and doesn't match
+                if category and query.query_name.lower() != category.lower():
+                    continue
+
+                # Filter tenders in this query
+                filtered_tenders = self._filter_tenders(
+                    query.tenders,
+                    location=location,
+                    state=state,
+                    tender_type=tender_type,
+                    min_value=min_value,
+                    max_value=max_value,
+                )
+
+                # Only include query if it has matching tenders
+                if filtered_tenders:
+                    aggregated_queries.append({
+                        "id": query.id,
+                        "query_name": query.query_name,
+                        "number_of_tenders": str(len(filtered_tenders)),
+                        "tenders": filtered_tenders,
+                    })
+
+        # Create DailyTendersResponse using the latest scrape run as metadata
+        # but with aggregated tenders from all runs
+        latest_run = scrape_runs[0]
+        return DailyTendersResponse(
+            id=latest_run.id,
+            run_at=latest_run.run_at,
+            date_str=f"{date_range} (aggregated)",
+            name=latest_run.name,
+            contact=latest_run.contact,
+            no_of_new_tenders=str(
+                sum(int(q["number_of_tenders"]) for q in aggregated_queries)
+            ),
+            company=latest_run.company,
+            queries=aggregated_queries,
+        )
 
     def get_tenders_by_specific_date(
         self,

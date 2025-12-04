@@ -170,3 +170,30 @@ class ScrapedTenderFile(Base):
     # Relationship
     tender_id = Column(UUID(as_uuid=True), ForeignKey('scraped_tenders.id'))
     tender = relationship("ScrapedTender", back_populates="files")
+
+
+class EmailTemplateHash(Base):
+    """
+    Stores the expected hash/fingerprint of incoming email templates for security validation.
+    If an incoming email's template structure doesn't match the stored hash, processing is stopped.
+    
+    This prevents processing emails with changed templates that could indicate:
+    - Email format changes from the sender
+    - Potential phishing or malicious emails
+    - Unexpected email structure that could break parsing
+    """
+    __tablename__ = 'email_template_hashes'
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    
+    # Template hash/fingerprint
+    template_hash = Column(String, nullable=False, unique=True, index=True)  # SHA256 hash of template structure
+    
+    # Metadata
+    email_sender = Column(String, nullable=False)  # Email sender this template is for (e.g., "tenders@tenderdetail.com")
+    is_active = Column(Boolean, default=True, nullable=False)  # Whether this template is currently active
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    last_validated_at = Column(DateTime, nullable=True)  # Last time an email matched this template
+    
+    # Description for reference
+    description = Column(Text, nullable=True)  # Optional description of the template

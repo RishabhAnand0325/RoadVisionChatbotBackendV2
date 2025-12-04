@@ -4,6 +4,7 @@ from uuid import UUID
 from decimal import Decimal
 from datetime import datetime, timezone
 import re
+from dateutil import parser as date_parser
 # Assume other necessary imports for ScrapedTender, Tender, etc. are here
 from app.modules.scraper.db.schema import ScrapedTender
 from app.modules.tenderiq.db.schema import Tender
@@ -11,6 +12,41 @@ from app.modules.tenderiq.models.pydantic_models import DailyTendersResponse, Fu
 from app.modules.tenderiq.repositories import repository as tenderiq_repo
 # REMOVED: Lazy import corrigendum service only when needed
 # from app.modules.tenderiq.services.corrigendum_service import CorrigendumTrackingService
+
+
+# --- NEW HELPER FUNCTION FOR DATE STANDARDIZATION ---
+def normalize_date_format(date_str: Optional[str]) -> str:
+    """
+    Converts various date formats to a standard ISO-like format (YYYY-MM-DD).
+    Handles: DD-MM-YYYY, DD/MM/YYYY, DD-Mon-YYYY, ISO formats, and others.
+    Returns empty string if date cannot be parsed.
+    """
+    if not date_str or not isinstance(date_str, str):
+        return ""
+    
+    date_str = date_str.strip()
+    if not date_str:
+        return ""
+    
+    try:
+        # First, try explicit DD-MM-YYYY format (most common in India)
+        if len(date_str) == 10 and date_str.count('-') == 2:
+            parts = date_str.split('-')
+            if all(p.isdigit() for p in parts):
+                day, month, year = int(parts[0]), int(parts[1]), int(parts[2])
+                if 1 <= day <= 31 and 1 <= month <= 12 and 1900 <= year <= 2100:
+                    from datetime import datetime as dt
+                    parsed_date = dt(year, month, day)
+                    return parsed_date.strftime("%Y-%m-%d")
+        
+        # Try dateutil parser for flexible parsing
+        parsed_date = date_parser.parse(date_str, dayfirst=True)
+        return parsed_date.strftime("%Y-%m-%d")
+    except Exception:
+        pass
+    
+    # If all parsing fails, return the original string (frontend will handle it)
+    return date_str
 
 
 # --- NEW HELPER FUNCTION ---
@@ -79,7 +115,7 @@ def orm_to_dict(obj, visited=None):
     return obj
 
 def get_full_tender_details(db: Session, tender_id: UUID) -> Optional[FullTenderDetails]:
-    # Get ScrapedTender with files and query relationship joined if exists
+    # Try to get ScrapedTender first
     scraped_tender = db.query(ScrapedTender).options(
         joinedload(ScrapedTender.files),
         joinedload(ScrapedTender.query)
@@ -87,20 +123,42 @@ def get_full_tender_details(db: Session, tender_id: UUID) -> Optional[FullTender
         ScrapedTender.id == tender_id
     ).first()
 
+    # If not found, try to get Tender and find its ScrapedTender counterpart
     if scraped_tender is None:
-        return None
+        tender = db.query(Tender).options(
+            joinedload(Tender.history)
+        ).filter(
+            Tender.id == tender_id
+        ).first()
+        
+        if tender is None:
+            return None
+        
+        # Find the ScrapedTender by tender_ref_number
+        scraped_tender = db.query(ScrapedTender).options(
+            joinedload(ScrapedTender.files),
+            joinedload(ScrapedTender.query)
+        ).filter(
+            ScrapedTender.tdr == tender.tender_ref_number
+        ).first()
+        
+        if scraped_tender is None:
+            return None
+    else:
+        # Found ScrapedTender, now get Tender
+        tender = db.query(Tender).options(
+            joinedload(Tender.history)
+        ).filter(
+            Tender.tender_ref_number == scraped_tender.tdr
+        ).first()
 
-    tender = db.query(Tender).options(
-        joinedload(Tender.history)
-    ).filter(
-        Tender.tender_ref_number == scraped_tender.tdr
-    ).first()
-
-    if tender is None:
-        return None
+        if tender is None:
+            return None
 
     scraped_dict = orm_to_dict(scraped_tender)
     tender_dict = orm_to_dict(tender)
+
+
 
     # --- FIX 1: Convert emd and tender_value from complex strings to integers ---
     # APPLY THE RENAMED FUNCTION: parse_indian_currency
@@ -128,6 +186,8 @@ def get_full_tender_details(db: Session, tender_id: UUID) -> Optional[FullTender
             if d.get(field) is None:
                 d[field] = ""
     
+
+    
     # --- FIX 2: Handle relational object for 'query' (Failing because it's an object/dict) ---
     query_obj = scraped_dict.get("query")
     if isinstance(query_obj, dict):
@@ -152,6 +212,18 @@ def get_full_tender_details(db: Session, tender_id: UUID) -> Optional[FullTender
 
     # Merge dictionaries, tender fields override scraped fields (retained)
     combined = {**scraped_dict, **tender_dict}
+    
+    # PRESERVE scraped_dict fields that shouldn't be overridden by empty tender_dict values
+    preserve_from_scraped = ["information_source", "publish_date"]
+    for field in preserve_from_scraped:
+        if scraped_dict.get(field) and not combined.get(field):
+            combined[field] = scraped_dict[field]
+
+    # --- NORMALIZE ALL DATE FIELDS TO STANDARD FORMAT ---
+    date_fields = ["publish_date", "due_date", "last_date_of_bid_submission", "tender_opening_date"]
+    for field in date_fields:
+        if field in combined and combined[field]:
+            combined[field] = normalize_date_format(combined[field])
 
     # --- REMAINING FIXES FOR PYDANTIC ERRORS (retained) ---
 
@@ -212,30 +284,37 @@ def get_full_tender_details(db: Session, tender_id: UUID) -> Optional[FullTender
                 # FIX: date_change.from_date/to_date require strings
                 date_change_value = item.get("date_change")
                 if not isinstance(date_change_value, dict):
-                     date_change_value = {}
-
-                # FIX: Convert the sentinel datetime to an ISO string for date_change sub-fields
-                sentinel_date_str = datetime.min.replace(tzinfo=timezone.utc).isoformat()
-                
-                # Ensure the required sub-fields are present and converted to string
-                from_date_raw = date_change_value.get("from_date")
-                to_date_raw = date_change_value.get("to_date")
-                
-                # Handle from_date - could be datetime, string, or None
-                if isinstance(from_date_raw, datetime):
-                    date_change_value["from_date"] = from_date_raw.isoformat()
-                elif isinstance(from_date_raw, str) and from_date_raw:
-                    date_change_value["from_date"] = from_date_raw
+                     date_change_value = None
                 else:
-                    date_change_value["from_date"] = sentinel_date_str
-                
-                # Handle to_date - could be datetime, string, or None
-                if isinstance(to_date_raw, datetime):
-                    date_change_value["to_date"] = to_date_raw.isoformat()
-                elif isinstance(to_date_raw, str) and to_date_raw:
-                    date_change_value["to_date"] = to_date_raw
-                else:
-                    date_change_value["to_date"] = sentinel_date_str
+                    # Only keep date_change if it has actual meaningful dates (not sentinel values)
+                    from_date_raw = date_change_value.get("from_date")
+                    to_date_raw = date_change_value.get("to_date")
+                    
+                    # Skip sentinel datetime values (year 1 means no real data)
+                    has_valid_from = from_date_raw and not isinstance(from_date_raw, str) or (isinstance(from_date_raw, str) and "0001" not in from_date_raw)
+                    has_valid_to = to_date_raw and not isinstance(to_date_raw, str) or (isinstance(to_date_raw, str) and "0001" not in to_date_raw)
+                    
+                    if not (has_valid_from or has_valid_to):
+                        date_change_value = None
+                    else:
+                        # Convert to ISO strings if we have valid data
+                        if isinstance(from_date_raw, datetime):
+                            date_change_value["from_date"] = from_date_raw.isoformat()
+                        elif isinstance(from_date_raw, str) and from_date_raw and "0001" not in from_date_raw:
+                            date_change_value["from_date"] = from_date_raw
+                        else:
+                            date_change_value["from_date"] = None
+                        
+                        if isinstance(to_date_raw, datetime):
+                            date_change_value["to_date"] = to_date_raw.isoformat()
+                        elif isinstance(to_date_raw, str) and to_date_raw and "0001" not in to_date_raw:
+                            date_change_value["to_date"] = to_date_raw
+                        else:
+                            date_change_value["to_date"] = None
+                        
+                        # If both are now None, don't include date_change
+                        if not date_change_value.get("from_date") and not date_change_value.get("to_date"):
+                            date_change_value = None
 
                 history_item_data = {
                     # Map standard/simple fields
@@ -263,7 +342,7 @@ def get_full_tender_details(db: Session, tender_id: UUID) -> Optional[FullTender
                 continue
         
         combined["history"] = new_history
-        combined["tender_history"] = new_history 
+        combined["tender_history"] = []  # Start with empty, only add corrigendum history
     else:
         combined["tender_history"] = []
         combined["history"] = []
@@ -287,19 +366,41 @@ def get_full_tender_details(db: Session, tender_id: UUID) -> Optional[FullTender
             
             # Add to tender_history (shown in frontend)
             combined["tender_history"].extend(corrigendum_history)
+        
+        # DEDUPLICATE tender_history: Keep only unique entries by type + date + note
+        # This prevents the same change from appearing multiple times
+        seen_tender_history: dict = {}
+        deduplicated_tender_history = []
+        
+        for item in combined["tender_history"]:
+            update_date = item.get("update_date", "")
+            history_type = item.get("type", "")
+            note = item.get("note", "")
             
-            # Sort by update_date descending (most recent first)
-            combined["tender_history"] = sorted(
-                combined["tender_history"],
-                key=lambda x: x.get("update_date", ""),
-                reverse=True
-            )
+            # Create a unique key for this history entry
+            key = f"{history_type}|{update_date}|{note}"
+            
+            if key not in seen_tender_history:
+                seen_tender_history[key] = True
+                deduplicated_tender_history.append(item)
+        
+        # Sort by update_date descending (most recent first)
+        combined["tender_history"] = sorted(
+            deduplicated_tender_history,
+            key=lambda x: x.get("update_date", ""),
+            reverse=True
+        )
+        
+        # LIMIT to last 10 unique changes to prevent clutter
+        combined["tender_history"] = combined["tender_history"][:10]
     except Exception as e:
         # Log error but don't fail the entire request
         pass
 
     # HACK: Remove the 'history' item if the "action" is empty (only for tender_action_history, not corrigendum)
     combined["history"] = [item for item in combined["history"] if item.get("action") is not None]
+
+
 
     # Validate the modified dictionary
     return FullTenderDetails.model_validate(combined)

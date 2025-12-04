@@ -58,6 +58,7 @@ class PDFProcessor:
     def __init__(self, embedding_model, tokenizer):
         self.embedding_model = embedding_model
         self.tokenizer = tokenizer
+        self.has_llamaparse = False  # Initialize to False by default
         
         if not HAS_PDF_LIBS:
             print("⚠️  PDF processing libraries not available")
@@ -185,6 +186,9 @@ class PDFProcessor:
     def extract_with_pymupdf(self, pdf_path: str) -> Dict[int, str]:
         """Fallback extraction using PyMuPDF"""
         page_texts = {}
+        if not HAS_PDF_LIBS:
+            print("❌ PyMuPDF not available - PDF libraries not installed")
+            return page_texts
         try:
             self.update_progress(ProcessingStage.PYMUPDF_LOADING, 0)
             doc = fitz.open(pdf_path)
@@ -204,6 +208,9 @@ class PDFProcessor:
     def extract_with_tesseract(self, pdf_path: str) -> Dict[int, str]:
         """Final fallback OCR using Tesseract"""
         page_texts = {}
+        if not HAS_PDF_LIBS:
+            print("❌ Tesseract OCR not available - PDF libraries not installed")
+            return page_texts
         try:
             print(f"🔎 Tesseract OCR processing...")
             self.update_progress(ProcessingStage.TESSERACT_LOADING, 0)
@@ -225,6 +232,9 @@ class PDFProcessor:
     def extract_tables(self, pdf_path: str) -> List[Dict]:
         """Extract tables using pdfplumber"""
         tables = []
+        if not HAS_PDF_LIBS:
+            print("⚠️  Table extraction not available - PDF libraries not installed")
+            return tables
         try:
             with pdfplumber.open(pdf_path) as pdf:
                 total_pages = len(pdf.pages)
