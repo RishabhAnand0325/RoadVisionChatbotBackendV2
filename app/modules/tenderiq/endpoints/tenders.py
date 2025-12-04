@@ -137,13 +137,18 @@ def get_tender_details(
 )
 def get_full_tender_details(
     tender_id: UUID,
+    tdr: str | None = None,
     db: Session = Depends(get_db_session)
 ):
     """
     Get complete tender details with all related data.
+    
+    Args:
+        tender_id: UUID of the tender (ScrapedTender.id or Tender.id)
+        tdr: Optional tender reference number (TDR) for fallback lookup
     """
     try:
-        tender_details = tender_service.get_full_tender_details(db, tender_id)
+        tender_details = tender_service.get_full_tender_details(db, tender_id, tdr)
         
         if not tender_details:
             raise HTTPException(
@@ -287,9 +292,11 @@ def perform_tender_action(
     except HTTPException as e:
         raise e
     except Exception as e:
+        import traceback
+        error_traceback = traceback.format_exc()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"An unexpected error occurred: {e}",
+            detail=f"An unexpected error occurred: {str(e)}\n{error_traceback}",
         )
 
 

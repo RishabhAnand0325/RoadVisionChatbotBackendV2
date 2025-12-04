@@ -169,9 +169,13 @@ class TenderFilterService:
             category = wishlist_entry.category or tender.category or ''
             
             if scraped_tender:
+                # Always use the latest scraped data to ensure consistency with Live Tenders page
+                title = scraped_tender.tender_name or title
+                authority = scraped_tender.company_name or authority
                 value = self._convert_word_currency_to_number(str(scraped_tender.value)) if scraped_tender.value else value
                 emd = self._convert_word_currency_to_number(str(scraped_tender.emd)) if scraped_tender.emd else emd
                 due_date = str(scraped_tender.due_date) if scraped_tender.due_date else due_date
+                category = tender.category or category  # Keep Tender category as it's more reliable than ScrapedTender
             
             # Determine analysis_state: use wishlist entry's analysis_state, or derive from analysis status
             from app.modules.analyze.db.schema import AnalysisStatusEnum
@@ -182,19 +186,23 @@ class TenderFilterService:
             else:
                 analysis_state = AnalysisStatusEnum.pending
             
-            # Use tender.id (from Tender table - stable across all scrape runs)
-            # This avoids ID mismatches when user views old scrape runs but wishlist shows newer ones
-            # The TenderDetails endpoint can handle both Tender IDs and ScrapedTender IDs via dual lookup
+            # Use wishlist_entry.id (the wishlist relationship ID)
+            # This is needed for the API endpoint /wishlist/{wishlist_id}/results/{results}
+            # to work correctly when updating tender results
+            wishlist_id = str(wishlist_entry.id)
+            
+            # Also store tender.id for reference in case needed
             tender_id = None
             if tender and tender.id:
                 tender_id = str(tender.id)
             
-            if not tender_id:
-                logger.warning(f"Failed to get valid tender ID for tender_ref {tender_ref}, skipping...")
+            if not wishlist_id:
+                logger.warning(f"Failed to get valid wishlist ID for tender_ref {tender_ref}, skipping...")
                 continue
             
             history_data = HistoryData(
-                id=tender_id,
+                id=wishlist_id,
+                tender_ref_number=tender.tender_ref_number if tender and tender.tender_ref_number else tender_ref,
                 title=title,
                 authority=authority,
                 value=int(value),
@@ -219,10 +227,9 @@ class TenderFilterService:
     def get_tender_details(self, db: Session, tender_id: UUID) -> Optional[Tender]:
         """
         Get full details for a single tender by its ID.
-        Supports both Tender IDs and ScrapedTender IDs for lookup.
+        Supports ScrapedTender IDs, Tender IDs, and TenderWishlist IDs for lookup.
         
-        First tries to find the ID in ScrapedTender table (preferred),
-        then falls back to Tender table for stable IDs from wishlist.
+        First tries ScrapedTender, then Tender, then TenderWishlist.
         """
         repo = TenderIQRepository(db)
         
@@ -232,6 +239,15 @@ class TenderFilterService:
             # Normalize dates before returning
             tender_dict = Tender.model_validate(tender).model_dump()
             
+            # Get the Tender model to populate action flags (is_wishlisted, is_favorite, is_archived)
+            tender_model = db.query(TenderModel).filter(
+                TenderModel.tender_ref_number == tender.tdr
+            ).first()
+            if tender_model:
+                tender_dict['is_wishlisted'] = tender_model.is_wishlisted
+                tender_dict['is_favorite'] = tender_model.is_favorite
+                tender_dict['is_archived'] = tender_model.is_archived
+            
             # Normalize all date fields
             date_fields = ["publish_date", "due_date", "last_date_of_bid_submission", "tender_opening_date"]
             for field in date_fields:
@@ -240,9 +256,11 @@ class TenderFilterService:
             
             return Tender.model_validate(tender_dict)
         
-        # Fallback: try to find by Tender ID (stable IDs from wishlist)
+        # Fallback: try to find by Tender ID (stable IDs from Tender table)
         tender_obj = db.query(TenderModel).filter(TenderModel.id == tender_id).first()
+        
         if not tender_obj:
+            # No tender found by either ScrapedTender ID or Tender ID
             return None
         
         # If found by Tender ID, get the most recent ScrapedTender for display
@@ -257,6 +275,11 @@ class TenderFilterService:
             tender_dict = Tender.model_validate(scraped_tender).model_dump()
         else:
             tender_dict = Tender.model_validate(tender_obj).model_dump()
+        
+        # Populate action flags from the Tender model
+        tender_dict['is_wishlisted'] = tender_obj.is_wishlisted
+        tender_dict['is_favorite'] = tender_obj.is_favorite
+        tender_dict['is_archived'] = tender_obj.is_archived
         
         # Normalize all date fields
         date_fields = ["publish_date", "due_date", "last_date_of_bid_submission", "tender_opening_date"]
@@ -325,10 +348,52 @@ class TenderFilterService:
             ScrapedTender.tender_id_str.in_(tender_ref_numbers)
         ).all()
         
-        return [Tender.model_validate(t) for t in scraped_tenders]
+        # Deduplicate by TDR - keep only the latest version of each tender
+        deduped_tenders = self._deduplicate_tenders_by_tdr(scraped_tenders)
+        
+        return [Tender.model_validate(t) for t in deduped_tenders]
+
+    def _deduplicate_tenders_by_tdr(self, tenders: list[ScrapedTender]) -> list[ScrapedTender]:
+        """
+        Deduplicate tenders by TDR (tender reference number).
+        When multiple versions of the same tender exist (due to corrigendums),
+        keeps only the latest one based on ID ordering.
+        
+        Args:
+            tenders: List of ScrapedTender objects that may contain duplicates
+            
+        Returns:
+            List of ScrapedTender objects with only one version per TDR
+        """
+        if not tenders:
+            return []
+        
+        # Group tenders by TDR
+        tdr_groups: dict[str, list[ScrapedTender]] = {}
+        
+        for tender in tenders:
+            tdr = tender.tdr or "unknown"
+            if tdr not in tdr_groups:
+                tdr_groups[tdr] = []
+            tdr_groups[tdr].append(tender)
+        
+        # For each TDR group, keep only the latest (last) version
+        # The latest version is typically the one with the highest ID or most recent timestamp
+        deduped = []
+        for tdr, tender_versions in tdr_groups.items():
+            if tender_versions:
+                # Sort by ID (string comparison works for UUIDs) to get consistent ordering
+                # Then take the last one (most recent)
+                latest = sorted(tender_versions, key=lambda t: str(t.id))[-1]
+                deduped.append(latest)
+        
+        return deduped
 
     def get_wishlisted_tenders(self, db: Session, user_id: UUID) -> list[Tender]:
-        """Gets all tenders that are wishlisted by the specified user."""
+        """
+        Gets all tenders that are wishlisted by the specified user.
+        Deduplicates by TDR (tender reference number) to show only the latest version.
+        """
         wishlist_repo = TenderWishlistRepository(db)
         user_wishlist = wishlist_repo.get_user_wishlist(user_id)
         
@@ -341,7 +406,17 @@ class TenderFilterService:
             ScrapedTender.tender_id_str.in_(tender_ref_numbers)
         ).all()
         
-        return [Tender.model_validate(t) for t in scraped_tenders]
+        # Deduplicate by TDR - keep only the latest version of each tender
+        deduped_tenders = self._deduplicate_tenders_by_tdr(scraped_tenders)
+        
+        # Convert to Tender models and set is_wishlisted=True for all (they came from wishlist)
+        result = []
+        for t in deduped_tenders:
+            tender_dict = Tender.model_validate(t).model_dump()
+            tender_dict['is_wishlisted'] = True  # All these are wishlisted
+            result.append(Tender.model_validate(tender_dict))
+        
+        return result
 
     def get_archived_tenders(self, db: Session, user_id: UUID) -> list[Tender]:
         """Gets all tenders that are archived by the specified user."""

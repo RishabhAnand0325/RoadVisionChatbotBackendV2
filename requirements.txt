@@ -139,5 +139,6 @@ validators
 weaviate
 weaviate-client
 wrapt
+xlrd
 yarl
 zstandard
