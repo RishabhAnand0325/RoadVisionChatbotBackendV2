@@ -7,7 +7,7 @@ import re
 from dateutil import parser as date_parser
 # Assume other necessary imports for ScrapedTender, Tender, etc. are here
 from app.modules.scraper.db.schema import ScrapedTender
-from app.modules.tenderiq.db.schema import Tender
+from app.modules.tenderiq.db.schema import Tender, TenderWishlist
 from app.modules.tenderiq.models.pydantic_models import DailyTendersResponse, FullTenderDetails, Tender as TenderModel
 from app.modules.tenderiq.repositories import repository as tenderiq_repo
 # REMOVED: Lazy import corrigendum service only when needed
@@ -114,63 +114,162 @@ def orm_to_dict(obj, visited=None):
         return obj._value_
     return obj
 
-def get_full_tender_details(db: Session, tender_id: UUID) -> Optional[FullTenderDetails]:
-    # Try to get ScrapedTender first
-    scraped_tender = db.query(ScrapedTender).options(
-        joinedload(ScrapedTender.files),
-        joinedload(ScrapedTender.query)
-    ).filter(
-        ScrapedTender.id == tender_id
-    ).first()
-
-    # If not found, try to get Tender and find its ScrapedTender counterpart
-    if scraped_tender is None:
-        tender = db.query(Tender).options(
-            joinedload(Tender.history)
-        ).filter(
-            Tender.id == tender_id
-        ).first()
+def get_full_tender_details(db: Session, tender_id: UUID, tdr: Optional[str] = None) -> Optional[FullTenderDetails]:
+    # Import here to avoid circular imports
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    try:
+        tender_id_str = str(tender_id)
+        logger.info(f"Attempting to fetch full tender details for ID: {tender_id_str}")
         
-        if tender is None:
-            return None
-        
-        # Find the ScrapedTender by tender_ref_number
+        # Step 1: Try to get ScrapedTender first (most common case - returned from wishlist/live tenders)
+        logger.debug(f"Step 1: Querying ScrapedTender by ID: {tender_id_str}")
         scraped_tender = db.query(ScrapedTender).options(
             joinedload(ScrapedTender.files),
             joinedload(ScrapedTender.query)
         ).filter(
-            ScrapedTender.tdr == tender.tender_ref_number
+            ScrapedTender.id == tender_id
         ).first()
-        
+
         if scraped_tender is None:
-            return None
-    else:
-        # Found ScrapedTender, now get Tender
-        tender = db.query(Tender).options(
-            joinedload(Tender.history)
-        ).filter(
-            Tender.tender_ref_number == scraped_tender.tdr
-        ).first()
+            logger.debug(f"Step 1 failed: ScrapedTender not found. Step 2: Querying Tender by ID")
+            # Step 2: Try to get Tender directly
+            tender = db.query(Tender).options(
+                joinedload(Tender.history)
+            ).filter(
+                Tender.id == tender_id
+            ).first()
+            
+            if tender is None:
+                # Step 3: If tdr (tender ref number) is provided, try to look up by that
+                if tdr:
+                    logger.info(f"Step 2 failed. Step 3: Trying lookup by tdr: {tdr}")
+                    tender = db.query(Tender).options(
+                        joinedload(Tender.history)
+                    ).filter(
+                        Tender.tender_ref_number == tdr
+                    ).first()
+                    
+                    if tender is not None:
+                        # Found by tdr, now get the most recent ScrapedTender for this tdr
+                        scraped_tender = db.query(ScrapedTender).options(
+                            joinedload(ScrapedTender.files),
+                            joinedload(ScrapedTender.query)
+                        ).filter(
+                            ScrapedTender.tdr == tdr
+                        ).order_by(ScrapedTender.id.desc()).first()  # Get most recent
+                        
+                        if scraped_tender is not None:
+                            scraped_dict = orm_to_dict(scraped_tender)
+                            tender_dict = orm_to_dict(tender)
+                        else:
+                            # Use Tender data alone
+                            scraped_dict = {}
+                            tender_dict = orm_to_dict(tender)
+                        logger.info(f"Step 3 success: Found tender by tdr")
+                    else:
+                        logger.warning(f"Step 3 failed: Tender not found by tdr: {tdr}")
+                        return None
+                else:
+                    # Step 4: Try to look up by TenderWishlist.id
+                    # This handles the case where frontend passes wishlist entry ID
+                    logger.info(f"Step 2 failed. Step 4: Trying lookup by TenderWishlist.id: {tender_id_str}")
+                    wishlist_entry = db.query(TenderWishlist).filter(
+                        TenderWishlist.id == tender_id
+                    ).first()
+                    
+                    if wishlist_entry is not None and wishlist_entry.tender_ref_number:
+                        tdr_from_wishlist = wishlist_entry.tender_ref_number
+                        logger.info(f"Step 4: Found wishlist entry, tdr={tdr_from_wishlist}. Looking up tender by tdr.")
+                        
+                        tender = db.query(Tender).options(
+                            joinedload(Tender.history)
+                        ).filter(
+                            Tender.tender_ref_number == tdr_from_wishlist
+                        ).first()
+                        
+                        if tender is not None:
+                            # Found by wishlist tdr, now get the most recent ScrapedTender
+                            scraped_tender = db.query(ScrapedTender).options(
+                                joinedload(ScrapedTender.files),
+                                joinedload(ScrapedTender.query)
+                            ).filter(
+                                ScrapedTender.tdr == tdr_from_wishlist
+                            ).order_by(ScrapedTender.id.desc()).first()
+                            
+                            if scraped_tender is not None:
+                                scraped_dict = orm_to_dict(scraped_tender)
+                                tender_dict = orm_to_dict(tender)
+                            else:
+                                scraped_dict = {}
+                                tender_dict = orm_to_dict(tender)
+                            logger.info(f"Step 4 success: Found tender via wishlist entry tdr")
+                        else:
+                            logger.warning(f"Step 4 failed: Tender not found by wishlist tdr: {tdr_from_wishlist}")
+                            return None
+                    else:
+                        # Additional debugging: check if tender exists at all with any lookup
+                        all_scraped_count = db.query(ScrapedTender).count()
+                        all_tender_count = db.query(Tender).count()
+                        logger.warning(f"Step 2 failed: Tender not found by ID. Lookup failed for {tender_id_str}. "
+                                     f"Total ScrapedTenders in DB: {all_scraped_count}, Total Tenders: {all_tender_count}. "
+                                     f"No tdr provided for fallback. Returning None.")
+                        return None
+            else:
+                # Step 2b: Found Tender directly by ID, now try to find corresponding ScrapedTender by tdr
+                logger.debug(f"Found Tender with ref: {tender.tender_ref_number}. Looking for ScrapedTender by tdr.")
+                scraped_tender = db.query(ScrapedTender).options(
+                    joinedload(ScrapedTender.files),
+                    joinedload(ScrapedTender.query)
+                ).filter(
+                    ScrapedTender.tdr == tender.tender_ref_number
+                ).first()
+                
+                # If ScrapedTender not found, use Tender data alone (don't return None)
+                if scraped_tender is None:
+                    logger.info(f"ScrapedTender not found for tender_ref: {tender.tender_ref_number}. Using Tender data alone.")
+                    scraped_dict = {}
+                    tender_dict = orm_to_dict(tender)
+                else:
+                    scraped_dict = orm_to_dict(scraped_tender)
+                    tender_dict = orm_to_dict(tender)
+        else:
+            logger.debug(f"Step 1 success: Found ScrapedTender. Looking for corresponding Tender by tdr: {scraped_tender.tdr}")
+            # Found ScrapedTender, now get corresponding Tender
+            tender = db.query(Tender).options(
+                joinedload(Tender.history)
+            ).filter(
+                Tender.tender_ref_number == scraped_tender.tdr
+            ).first()
 
-        if tender is None:
-            return None
-
-    scraped_dict = orm_to_dict(scraped_tender)
-    tender_dict = orm_to_dict(tender)
-
-
+            if tender is None:
+                # Use ScrapedTender data alone
+                logger.info(f"Tender not found for tdr: {scraped_tender.tdr}. Using ScrapedTender data alone.")
+                scraped_dict = orm_to_dict(scraped_tender)
+                tender_dict = {}
+            else:
+                scraped_dict = orm_to_dict(scraped_tender)
+                tender_dict = orm_to_dict(tender)
+    
+    except Exception as e:
+        logger.error(f"Error loading tender data for ID {tender_id}: {str(e)}", exc_info=True)
+        raise
 
     # --- FIX 1: Convert emd and tender_value from complex strings to integers ---
     # APPLY THE RENAMED FUNCTION: parse_indian_currency
-    if "emd" in scraped_dict:
-        scraped_dict['emd'] = parse_indian_currency(scraped_dict['emd'])
-    if 'tender_value' in scraped_dict:
-        scraped_dict['tender_value'] = parse_indian_currency(scraped_dict['tender_value'])
-    if 'emd' in tender_dict:
-        tender_dict['emd'] = parse_indian_currency(tender_dict['emd'])
-    if 'tender_value' in tender_dict:
-        tender_dict['tender_value'] = parse_indian_currency(tender_dict['tender_value'])
-        
+    try:
+        if scraped_dict and "emd" in scraped_dict:
+            scraped_dict['emd'] = parse_indian_currency(scraped_dict['emd'])
+        if scraped_dict and 'tender_value' in scraped_dict:
+            scraped_dict['tender_value'] = parse_indian_currency(scraped_dict['tender_value'])
+        if tender_dict and 'emd' in tender_dict:
+            tender_dict['emd'] = parse_indian_currency(tender_dict['emd'])
+        if tender_dict and 'tender_value' in tender_dict:
+            tender_dict['tender_value'] = parse_indian_currency(tender_dict['tender_value'])
+    except Exception as e:
+        logger.error(f"Error parsing currency values for tender {tender_id}: {str(e)}", exc_info=True)
+        # Don't fail completely, just log and continue
 
     # Sanitize string fields that can be legitimately None in the database
     string_fields_to_sanitize = [
@@ -179,7 +278,8 @@ def get_full_tender_details(db: Session, tender_id: UUID) -> Optional[FullTender
         "tender_type", "bidding_type", "competition_type", "tender_details", 
         "company_name", "contact_person", "address", "information_source", 
         "portal_source", "portal_url", "document_url", "reviewed_by_id", 
-        "employer_address", "mode"
+        "employer_address", "mode", "tender_opening_date", "publish_date",
+        "last_date_of_bid_submission"
     ]
     for field in string_fields_to_sanitize:
         for d in (scraped_dict, tender_dict):
@@ -214,11 +314,29 @@ def get_full_tender_details(db: Session, tender_id: UUID) -> Optional[FullTender
     combined = {**scraped_dict, **tender_dict}
     
     # PRESERVE scraped_dict fields that shouldn't be overridden by empty tender_dict values
-    preserve_from_scraped = ["information_source", "publish_date"]
+    # This is critical for fields like dates and information_source where tender_dict may have empty strings
+    preserve_from_scraped = [
+        "information_source", "publish_date", "tender_opening_date", 
+        "last_date_of_bid_submission"
+    ]
     for field in preserve_from_scraped:
         if scraped_dict.get(field) and not combined.get(field):
             combined[field] = scraped_dict[field]
 
+    # --- FIX: Ensure nullable string fields are never None ---
+    # This must happen after the merge to catch any None values that made it through
+    nullable_string_fields = [
+        "error_message", "query_id", "tendering_authority", "tender_no",
+        "tender_id_detail", "tender_brief", "state", "document_fees", 
+        "tender_type", "bidding_type", "competition_type", "tender_details", 
+        "company_name", "contact_person", "address", "information_source", 
+        "portal_source", "portal_url", "document_url", "reviewed_by_id", 
+        "employer_address", "mode", "tender_opening_date", "publish_date",
+        "last_date_of_bid_submission"
+    ]
+    for field in nullable_string_fields:
+        if combined.get(field) is None:
+            combined[field] = ""
     # --- NORMALIZE ALL DATE FIELDS TO STANDARD FORMAT ---
     date_fields = ["publish_date", "due_date", "last_date_of_bid_submission", "tender_opening_date"]
     for field in date_fields:
@@ -400,10 +518,13 @@ def get_full_tender_details(db: Session, tender_id: UUID) -> Optional[FullTender
     # HACK: Remove the 'history' item if the "action" is empty (only for tender_action_history, not corrigendum)
     combined["history"] = [item for item in combined["history"] if item.get("action") is not None]
 
-
-
     # Validate the modified dictionary
-    return FullTenderDetails.model_validate(combined)
+    try:
+        return FullTenderDetails.model_validate(combined)
+    except Exception as e:
+        logger.error(f"Error validating FullTenderDetails for tender {tender_id}: {str(e)}", exc_info=True)
+        logger.error(f"Combined dict keys: {list(combined.keys())}")
+        raise
 
 def get_daily_tenders(db: Session, start: Optional[int] = 0, end: Optional[int] = 1000, run_id: Optional[str] = None) -> DailyTendersResponse:
     scrape_runs = tenderiq_repo.get_scrape_runs(db)

@@ -139,3 +139,41 @@ def reset_password(request: ResetPasswordRequest, db: Session = Depends(get_db_s
 
     auth_repo.update_password(user, request.new_password)
     return {"message": "Password has been successfully reset."}
+
+@router.patch("/preferences/auto-analyze", tags=["User Settings"])
+def toggle_auto_analyze_preference(
+    enabled: bool,
+    db: Session = Depends(get_db_session),
+    current_user: SQLUser = Depends(get_current_active_user)
+):
+    """
+    Toggle the auto-analysis preference when wishlisting tenders.
+    
+    Args:
+        enabled: Boolean to enable or disable auto-analysis on wishlist
+        
+    Returns:
+        Updated user preference status
+    """
+    current_user.auto_analyze_on_wishlist = enabled
+    db.commit()
+    db.refresh(current_user)
+    return {
+        "auto_analyze_on_wishlist": current_user.auto_analyze_on_wishlist,
+        "message": f"Auto-analysis on wishlist has been {'enabled' if enabled else 'disabled'}"
+    }
+
+@router.get("/preferences", tags=["User Settings"])
+def get_user_preferences(
+    db: Session = Depends(get_db_session),
+    current_user: SQLUser = Depends(get_current_active_user)
+):
+    """
+    Get current user preferences.
+    
+    Returns:
+        User preferences including auto_analyze_on_wishlist
+    """
+    return {
+        "auto_analyze_on_wishlist": current_user.auto_analyze_on_wishlist,
+    }

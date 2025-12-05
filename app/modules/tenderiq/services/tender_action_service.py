@@ -5,13 +5,14 @@ import uuid
 import logging
 from typing import Optional
 from sqlalchemy.orm import Session
+from sqlalchemy import desc
 from fastapi import HTTPException, status
 import threading
 
 from app.modules.tenderiq.db.tenderiq_repository import TenderIQRepository
 from app.modules.tenderiq.db.repository import TenderRepository, TenderWishlistRepository
-from app.modules.tenderiq.models.pydantic_models import TenderActionRequest, TenderActionType
-from app.modules.tenderiq.db.schema import Tender, TenderActionEnum, TenderWishlist
+from app.modules.tenderiq.models.pydantic_models import TenderActionRequest, TenderActionType, Tender
+from app.modules.tenderiq.db.schema import Tender as TenderModel, TenderActionEnum, TenderWishlist
 from app.modules.analyze.scripts.analyze_tender import analyze_tender
 from app.db.database import SessionLocal
 from app.modules.scraper.db.schema import ScrapedTender
@@ -27,11 +28,40 @@ class TenderActionService:
         self.scraped_tender_repo = TenderIQRepository(db)
 
     def perform_action(self, tender_id: uuid.UUID, user_id: uuid.UUID, request: TenderActionRequest) -> Tender:
+        logger.info(f"Performing action on tender: {tender_id}, action: {request.action}")
+        
+        # Step 1: Try to get by ScrapedTender ID first (most common case)
         scraped_tender = self.scraped_tender_repo.get_tender_by_id(tender_id)
+        logger.debug(f"Step 1 - ScrapedTender lookup for {tender_id}: {'Found' if scraped_tender else 'Not found'}")
+        
+        # If not found, try to get by Tender ID (secondary fallback)
         if not scraped_tender:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tender not found")
-
-        tender = self.tender_repo.get_or_create_by_id(scraped_tender)
+            logger.debug(f"Step 2 - Tender lookup for {tender_id}")
+            tender_obj = self.db.query(TenderModel).filter(TenderModel.id == tender_id).first()
+            logger.debug(f"Step 2 - Tender lookup result: {'Found' if tender_obj else 'Not found'}")
+            
+            if not tender_obj:
+                logger.error(f"Tender not found in database: {tender_id}")
+                # Check if tender exists with different conditions
+                all_tenders_count = self.db.query(TenderModel).count()
+                all_scraped_tenders_count = self.db.query(ScrapedTender).count()
+                logger.error(f"Total Tenders in DB: {all_tenders_count}, Total ScrapedTenders: {all_scraped_tenders_count}")
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Tender {tender_id} not found")
+            
+            # Get the most recent ScrapedTender for this Tender
+            scraped_tender = self.db.query(ScrapedTender).filter(
+                ScrapedTender.tender_id_str == tender_obj.tender_ref_number
+            ).order_by(
+                desc(ScrapedTender.id)  # Order by ID descending to get most recent
+            ).first()
+            if not scraped_tender:
+                # If no ScrapedTender exists, we'll work with just the Tender model
+                logger.warning(f"No ScrapedTender found for Tender {tender_id}, using Tender model directly")
+                tender = tender_obj
+            else:
+                tender = self.tender_repo.get_or_create_by_id(scraped_tender)
+        else:
+            tender = self.tender_repo.get_or_create_by_id(scraped_tender)
 
         updates = {}
         action_to_log: Optional[TenderActionEnum] = None
@@ -43,7 +73,8 @@ class TenderActionService:
 
             # Handle wishlist using TenderWishlist table for user-specific tracking
             wishlist_repo = TenderWishlistRepository(self.db)
-            tender_ref = scraped_tender.tender_id_str
+            # Get tender_ref from scraped_tender if available, otherwise from tender model
+            tender_ref = scraped_tender.tender_id_str if scraped_tender else tender.tender_ref_number
             
             if updates['is_wishlisted']:
                 wishlist_id = None
@@ -66,31 +97,46 @@ class TenderActionService:
                             return get_number_from_currency_string(value)
                         return 0.0
                     
-                    value_float = safe_convert_to_float(scraped_tender.value or tender.estimated_cost)
-                    emd_float = safe_convert_to_float(scraped_tender.emd or tender.bid_security)
+                    if scraped_tender:
+                        value_float = safe_convert_to_float(scraped_tender.value or tender.estimated_cost)
+                        emd_float = safe_convert_to_float(scraped_tender.emd or tender.bid_security)
+                        title = scraped_tender.tender_name or tender.tender_title or ''
+                        authority = scraped_tender.company_name or tender.employer_name or ''
+                        category = tender.category or (scraped_tender.query.query_name if scraped_tender.query else '')
+                        due_date = scraped_tender.due_date or ''
+                    else:
+                        value_float = safe_convert_to_float(tender.estimated_cost)
+                        emd_float = safe_convert_to_float(tender.bid_security)
+                        title = tender.tender_title or ''
+                        authority = tender.employer_name or ''
+                        category = tender.category or ''
+                        due_date = ''
                     
                     wishlist_data = {
                         'id': str(uuid_module.uuid4()),
                         'tender_ref_number': tender_ref,
                         'user_id': user_id,
-                        'title': scraped_tender.tender_name or tender.tender_title or '',
-                        'authority': scraped_tender.company_name or tender.employer_name or '',
+                        'title': title,
+                        'authority': authority,
                         'value': value_float,
                         'emd': emd_float,
-                        'due_date': scraped_tender.due_date or '',
-                        'category': tender.category or scraped_tender.query.query_name if scraped_tender.query else '',
+                        'due_date': due_date,
+                        'category': category,
                     }
                     wishlist_entry = wishlist_repo.add_to_wishlist(wishlist_data)
                     wishlist_id = wishlist_entry.id
                 
                 # Trigger analysis in background (only if not already analyzed)
                 from app.modules.analyze.db.schema import TenderAnalysis, AnalysisStatusEnum
+                from app.modules.auth.db.schema import User
+                
                 existing_analysis = self.db.query(TenderAnalysis).filter(
                     TenderAnalysis.tender_id == tender_ref
                 ).first()
                 
-                # Always trigger analysis when wishlisting (per user request)
-                should_trigger = True
+                # Check user preference for auto-analysis
+                user = self.db.query(User).filter(User.id == user_id).first()
+                should_trigger = user.auto_analyze_on_wishlist if user else True
                 
                 if should_trigger:
                     logger.info(f"Triggering analysis for wishlisted tender: {tender_ref} (wishlist_id: {wishlist_id})")

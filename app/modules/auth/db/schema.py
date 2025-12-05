@@ -54,6 +54,7 @@ class User(Base):
     password_expiry_date = Column(Date, nullable=True)
     role = Column(String(50), nullable=False, default='employee') # 'super_admin', 'dept_admin', 'employee'
     is_active = Column(Boolean, default=True) # Retained for simple active check, complements account_status
+    auto_analyze_on_wishlist = Column(Boolean, default=True) # Auto-trigger analysis when wishlisting tenders
 
 class UserRoles(Base):
     __tablename__ = "user_roles"

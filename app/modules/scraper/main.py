@@ -17,6 +17,7 @@ import os
 # Local modules
 from app.db.database import SessionLocal
 from app.modules.scraper.db.repository import ScraperRepository
+from app.modules.scraper.db.schema import ScrapedTender
 from app.modules.tenderiq.db.repository import TenderRepository
 from .detail_page_scrape import scrape_tender
 # from .process_tender import start_tender_processing
@@ -178,6 +179,77 @@ def scrape_link(link: str, source_priority: str = "normal", skip_dedup_check: bo
                             #     logger.debug(f"⚠️  Skipping tender due to value: {tender_data.details.notice.tender_value}")
                             #     tenders_to_remove.append(tender_data)
                             #     continue
+
+                            # Check if this is a corrigendum tender (by name)
+                            is_corrigendum = 'corrigendum' in tender_data.tender_name.lower() or 'amendment' in tender_data.tender_name.lower()
+                            
+                            if is_corrigendum:
+                                logger.info(f"📝 CORRIGENDUM DETECTED in name: {tender_data.tender_name}")
+                                # Try to find parent tender by TDR
+                                try:
+                                    from app.modules.tenderiq.services.corrigendum_service import CorrigendumTrackingService
+                                    from app.modules.tenderiq.db.repository import TenderRepository as TIQTenderRepository
+                                    from app.modules.scraper.db.schema import ScrapedTenderFile
+                                    
+                                    tiq_repo = TIQTenderRepository(scraper_repo.db)
+                                    corrigendum_service = CorrigendumTrackingService(scraper_repo.db)
+                                    
+                                    # Get TDR from the corrigendum details
+                                    corr_tdr = tender_data.details.notice.tdr if tender_data.details else None
+                                    
+                                    if corr_tdr:
+                                        # Find parent tender by TDR
+                                        parent_tender = tiq_repo.get_by_tender_ref(corr_tdr)
+                                        
+                                        if parent_tender:
+                                            logger.info(f"   ✓ Found parent tender: {parent_tender.tender_ref_number}")
+                                            
+                                            # Get the parent's scraped tender to add files to
+                                            parent_scraped = scraper_repo.db.query(ScrapedTender).filter(
+                                                ScrapedTender.tender_id_str == corr_tdr
+                                            ).order_by(ScrapedTender.id.desc()).first()
+                                            
+                                            if parent_scraped and tender_data.details:
+                                                # Add new files from corrigendum to parent tender
+                                                existing_file_urls = {f.file_url for f in parent_scraped.files}
+                                                new_files_added = 0
+                                                
+                                                for corr_file in tender_data.details.other_detail.files:
+                                                    if corr_file.file_url not in existing_file_urls:
+                                                        new_file = ScrapedTenderFile(
+                                                            tender_id=parent_scraped.id,
+                                                            file_name=f"[Corrigendum] {corr_file.file_name}",
+                                                            file_url=corr_file.file_url,
+                                                            file_description=corr_file.file_description,
+                                                            file_size=corr_file.file_size
+                                                        )
+                                                        scraper_repo.db.add(new_file)
+                                                        new_files_added += 1
+                                                
+                                                if new_files_added > 0:
+                                                    scraper_repo.db.commit()
+                                                    logger.info(f"   ✓ Added {new_files_added} new files from corrigendum to parent tender")
+                                                
+                                                # Log the corrigendum in history (detect and apply changes)
+                                                # First save the corrigendum scraped data temporarily
+                                                scraped_tender_orm = scraper_repo.add_scraped_tender_details(query_orm, tender_data, tender_release_date)
+                                                
+                                                # Detect and log changes
+                                                changes = corrigendum_service.detect_changes(corr_tdr, scraped_tender_orm)
+                                                if changes:
+                                                    logger.info(f"   🔔 Corrigendum changes detected: {len(changes)} fields changed")
+                                                    for change in changes:
+                                                        logger.info(f"      • {change.field}: {change.old_value} → {change.new_value}")
+                                                
+                                                # Skip creating a new main tender entry for corrigendum
+                                                logger.info(f"   ✓ Corrigendum merged into parent tender, skipping separate entry")
+                                                continue  # Don't create separate tender entry
+                                        else:
+                                            logger.warning(f"   ⚠️  Parent tender not found for TDR: {corr_tdr}, creating as new tender")
+                                    else:
+                                        logger.warning(f"   ⚠️  No TDR found in corrigendum, creating as new tender")
+                                except Exception as corr_merge_error:
+                                    logger.warning(f"   ⚠️  Error merging corrigendum: {str(corr_merge_error)}, creating as new tender")
 
                             # 2. Populate scraped_tenders table
                             logger.debug(f"💾 Saving to 'scraped_tenders': {tender_data.tender_name}")

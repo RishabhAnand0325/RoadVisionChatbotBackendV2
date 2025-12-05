@@ -38,9 +38,16 @@ class TenderRepository:
                 portal_url=scraped_tender.information_source,
             )
             self.db.add(tender)
-            self.db.commit()
-            self.db.refresh(tender)
+        self.db.commit()
+        self.db.refresh(tender)
         return tender
+
+    def get_by_tender_ref(self, tender_ref: str) -> Optional[Tender]:
+        """
+        Gets a Tender by its tender reference number (TDR).
+        Returns None if not found.
+        """
+        return self.db.query(Tender).filter(Tender.tender_ref_number == tender_ref).first()
 
     def update(self, tender: Tender, updates: dict) -> Tender:
         """Updates a Tender instance with new values."""

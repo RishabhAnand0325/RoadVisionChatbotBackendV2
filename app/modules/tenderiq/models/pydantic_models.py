@@ -91,6 +91,9 @@ class Tender(BaseModel):
     information_source: Optional[str] = None
     files: list[TenderFile]
     dms_folder_id: Optional[UUID] = None
+    is_wishlisted: bool = False
+    is_favorite: bool = False
+    is_archived: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -263,6 +266,7 @@ class HistoryDataResultsEnum(str, Enum):
 
 class HistoryData(BaseModel):
     id: str
+    tender_ref_number: str  # Used for matching wishlisted tenders on frontend
     title: str;
     authority: str;
     value: int;
