@@ -38,8 +38,8 @@ class TenderRepository:
                 portal_url=scraped_tender.information_source,
             )
             self.db.add(tender)
-            self.db.commit()
-            self.db.refresh(tender)
+        self.db.commit()
+        self.db.refresh(tender)
         return tender
 
     def get_by_tender_ref(self, tender_ref: str) -> Optional[Tender]:

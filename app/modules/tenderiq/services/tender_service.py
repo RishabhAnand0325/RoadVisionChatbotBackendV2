@@ -337,7 +337,6 @@ def get_full_tender_details(db: Session, tender_id: UUID, tdr: Optional[str] = N
     for field in nullable_string_fields:
         if combined.get(field) is None:
             combined[field] = ""
-
     # --- NORMALIZE ALL DATE FIELDS TO STANDARD FORMAT ---
     date_fields = ["publish_date", "due_date", "last_date_of_bid_submission", "tender_opening_date"]
     for field in date_fields:

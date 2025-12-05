@@ -17,6 +17,7 @@ import os
 # Local modules
 from app.db.database import SessionLocal
 from app.modules.scraper.db.repository import ScraperRepository
+from app.modules.scraper.db.schema import ScrapedTender
 from app.modules.tenderiq.db.repository import TenderRepository
 from .detail_page_scrape import scrape_tender
 # from .process_tender import start_tender_processing
