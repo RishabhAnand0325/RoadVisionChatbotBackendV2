@@ -160,7 +160,7 @@ class TenderWishlistRepository:
             TenderWishlist object or None if not found
         """
         return self.db.query(TenderWishlist).filter(
-            TenderWishlist.id == wishlist_id
+            TenderWishlist.id == str(wishlist_id)
         ).first()
 
     def get_wishlist_by_tender_ref(self, tender_ref_number: str, user_id: UUID = None) -> Optional[TenderWishlist]:
@@ -222,7 +222,7 @@ class TenderWishlistRepository:
             True if successfully deleted, False if not found
         """
         result = self.db.query(TenderWishlist).filter(
-            TenderWishlist.id == wishlist_id
+            TenderWishlist.id == str(wishlist_id)
         ).delete()
         self.db.commit()
         return result > 0
@@ -256,7 +256,7 @@ class TenderWishlistRepository:
             Updated TenderWishlist object or None if not found
         """
         wishlist = self.db.query(TenderWishlist).filter(
-            TenderWishlist.id == wishlist_id
+            TenderWishlist.id == str(wishlist_id)
         ).first()
         
         if not wishlist:

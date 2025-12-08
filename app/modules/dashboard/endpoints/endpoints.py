@@ -32,6 +32,7 @@ def get_dashboard_summary(db: Session = Depends(get_db_session)):
         .join(ScrapedTender.query)
         .join(ScrapedTenderQuery.scrape_run)
         .filter(func.date(ScrapeRun.run_at) >= first_day_this_month)
+        .filter(ScrapedTender.analysis_status == 'completed')
         .count()
     )
     

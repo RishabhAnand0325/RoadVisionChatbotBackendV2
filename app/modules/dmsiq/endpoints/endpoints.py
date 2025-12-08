@@ -19,8 +19,10 @@ from app.modules.dmsiq.models.pydantic_models import (
     FolderPermission, DocumentPermission,
     FolderPermissionGrant, DocumentPermissionGrant,
     UploadURLRequest, UploadURLResponse, ConfirmUploadRequest,
-    DownloadURLResponse
+    UploadURLRequest, UploadURLResponse, ConfirmUploadRequest,
+    DownloadURLResponse, AISummary
 )
+from app.modules.dmsiq.services.document_analysis_service import DocumentAnalysisService
 
 router = APIRouter()
 
@@ -409,3 +411,15 @@ def revoke_document_permission(
     Requires admin permission on document.
     """
     service.revoke_document_permission(document_id, permission_id)
+
+
+@router.post("/documents/{document_id}/analyze", response_model=AISummary, tags=["DMS - Documents"])
+async def analyze_document(
+    document_id: UUID,
+    db: Session = Depends(get_db_session)
+):
+    """
+    Analyze document content using AI to generate summary and metadata.
+    """
+    service = DocumentAnalysisService(db)
+    return await service.analyze_document(document_id)
