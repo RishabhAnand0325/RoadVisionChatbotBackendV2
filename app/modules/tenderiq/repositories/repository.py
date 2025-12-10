@@ -1,6 +1,6 @@
 from typing import List
 from uuid import UUID
-from sqlalchemy import Float, cast, desc, func
+from sqlalchemy import Float, cast, desc, func, case, text
 from sqlalchemy.orm import Session, joinedload, noload, selectinload
 from sqlalchemy.sql import over
 
@@ -17,7 +17,17 @@ def get_tenders_from_category(db: Session, query: ScrapedTenderQuery, offset: in
 
     if min_publish_date:
         # Assuming publish_date is stored as 'DD-MM-YYYY' string
-        base_query = base_query.filter(func.to_date(ScrapedTender.publish_date, 'DD-MM-YYYY') >= func.to_date(min_publish_date, 'YYYY-MM-DD'))
+        # Use safe string comparison by converting DD-MM-YYYY to YYYY-MM-DD
+        # We use regexp_replace to flip the date parts
+        iso_date_str = func.regexp_replace(ScrapedTender.publish_date, r'^(\d{2})-(\d{2})-(\d{4})$', r'\3-\2-\1')
+        
+        # Only compare if it looks like a valid date format, otherwise ignore (treat as NULL/small)
+        # If it matches regex, use the ISO string. Else use '0000-00-00'
+        safe_iso_date = case(
+            (text("scraped_tenders.publish_date ~ '^\\d{2}-\\d{2}-\\d{4}$'"), iso_date_str),
+            else_='0000-00-00'
+        )
+        base_query = base_query.filter(safe_iso_date >= min_publish_date)
 
     if unique_only:
         # Get only unique tenders by tender_no (keep first/oldest occurrence of each duplicate)
@@ -32,7 +42,12 @@ def get_tenders_from_category(db: Session, query: ScrapedTenderQuery, offset: in
         ).filter(ScrapedTender.query_id == query.id)
         
         if min_publish_date:
-            subquery = subquery.filter(func.to_date(ScrapedTender.publish_date, 'DD-MM-YYYY') >= func.to_date(min_publish_date, 'YYYY-MM-DD'))
+            iso_date_str_sub = func.regexp_replace(ScrapedTender.publish_date, r'^(\d{2})-(\d{2})-(\d{4})$', r'\3-\2-\1')
+            safe_iso_date_sub = case(
+                (text("scraped_tenders.publish_date ~ '^\\d{2}-\\d{2}-\\d{4}$'"), iso_date_str_sub),
+                else_='0000-00-00'
+            )
+            subquery = subquery.filter(safe_iso_date_sub >= min_publish_date)
         
         subquery = subquery.subquery()
         
@@ -42,9 +57,17 @@ def get_tenders_from_category(db: Session, query: ScrapedTenderQuery, offset: in
             .filter(subquery.c.rn == 1)
         )
 
+    # Safe sort by publish_date
+    # Use string sort on YYYY-MM-DD converted string
+    iso_date_str_sort = func.regexp_replace(ScrapedTender.publish_date, r'^(\d{2})-(\d{2})-(\d{4})$', r'\3-\2-\1')
+    safe_date_sort = case(
+        (text("scraped_tenders.publish_date ~ '^\\d{2}-\\d{2}-\\d{4}$'"), iso_date_str_sort),
+        else_='0000-00-00'
+    )
+
     return (
         base_query
-        .order_by(desc(func.to_date(ScrapedTender.publish_date, 'DD-MM-YYYY')))
+        .order_by(desc(safe_date_sort))
         .options(joinedload(ScrapedTender.files))
         .offset(offset)
         .limit(limit)

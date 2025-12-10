@@ -125,19 +125,19 @@ EXAMPLE OF GOOD REQUIREMENT TEXT:
 "The bidder must demonstrate Bid Capacity calculated using the formula: Bid Capacity = (A x N x 2) - B, where A is the Average Annual Financial Turnover during the last three financial years (2020-21, 2021-22, 2022-23) updated to price level of current year using WPI, N is the number of years prescribed for completion of works for which bids are invited (2 years in this case), and B is the value of existing commitments and ongoing works to be completed during the period of completion of work for which bids are invited. The assessed Bid Capacity should be equal to or more than the estimated cost put to tender. Bidders must submit audited balance sheets and profit & loss statements for the last 3 financial years, along with CA certificate in prescribed format. Joint ventures shall combine the capacity of all partners as per their profit sharing ratio."
 
 CRITICAL FORMATTING RULES FOR CURRENCY:
-- Convert all amounts to Crores or Lakhs format: "Rs. X.XX Crores" or "Rs. X.XX Lakhs"
+- Convert all amounts to Cr or L format: "Rs. X.XX Cr" or "Rs. X.XX L"
 - 1 Crore = 10,000,000 (1,00,00,000)
 - 1 Lakh = 100,000 (1,00,000)
 - Examples: 
-  * "INR 46300000" → "Rs. 4.63 Crores"
-  * "Rs 25000000" → "Rs. 2.50 Crores"
-  * "500000" → "Rs. 5.00 Lakhs"
+  * "INR 46300000" → "Rs. 4.63 Cr"
+  * "Rs 25000000" → "Rs. 2.50 Cr"
+  * "500000" → "Rs. 5.00 L"
 
 FORMAT each as:
 {{
   "description": "Clear, short label WITHOUT prefixes (e.g., 'EMD Amount', 'Minimum Turnover', 'Similar Work Experience')",
   "requirement": "COMPLETE DETAILED requirement text with FULL CONTEXT (MINIMUM 100 words, include ALL formulas, conditions, exemptions, procedures, clause references, numerical values)",
-  "extractedValue": "Amount in 'Rs. X.XX Crores' or 'Rs. X.XX Lakhs' format, or empty string if not applicable"
+  "extractedValue": "Amount in 'Rs. X.XX Cr' or 'Rs. X.XX L' format, or empty string if not applicable"
 }}
 
 AVOID DUPLICATES:
