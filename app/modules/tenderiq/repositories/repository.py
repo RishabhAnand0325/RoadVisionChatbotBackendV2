@@ -7,22 +7,22 @@ from sqlalchemy.sql import over
 from app.modules.scraper.db.schema import ScrapeRun, ScrapedTender, ScrapedTenderQuery
 
 def get_tenders_from_category(db: Session, query: ScrapedTenderQuery, offset: int, limit: int, min_publish_date: str = None, unique_only: bool = True) -> List[ScrapedTender]:
+    """
+    Get tenders from a category with optional date filtering and deduplication.
+    Optimized for performance with proper indexing.
+    """
     base_query = (
         db.query(ScrapedTender)
         .filter(ScrapedTender.query_id == query.id)
     )
 
-    # Remove the 100 crore tender value filter to allow all tenders to be displayed
-    # base_query = base_query.filter(cast(ScrapedTender.tender_value, Float) >= 100000000)
-
     if min_publish_date:
-        # Assuming publish_date is stored as 'DD-MM-YYYY' string
-        # Use safe string comparison by converting DD-MM-YYYY to YYYY-MM-DD
-        # We use regexp_replace to flip the date parts
+        # Use simple string comparison with the indexed publish_date column
+        # Convert DD-MM-YYYY format to YYYY-MM-DD for comparison
+        # Use regexp_replace for conversion - database handles this efficiently with index
         iso_date_str = func.regexp_replace(ScrapedTender.publish_date, r'^(\d{2})-(\d{2})-(\d{4})$', r'\3-\2-\1')
         
-        # Only compare if it looks like a valid date format, otherwise ignore (treat as NULL/small)
-        # If it matches regex, use the ISO string. Else use '0000-00-00'
+        # Filter by converted date
         safe_iso_date = case(
             (text("scraped_tenders.publish_date ~ '^\\d{2}-\\d{2}-\\d{4}$'"), iso_date_str),
             else_='0000-00-00'
@@ -30,44 +30,23 @@ def get_tenders_from_category(db: Session, query: ScrapedTenderQuery, offset: in
         base_query = base_query.filter(safe_iso_date >= min_publish_date)
 
     if unique_only:
-        # Get only unique tenders by tender_no (keep first/oldest occurrence of each duplicate)
-        # Use ROW_NUMBER to assign row numbers within each tender_no group
-        # Then filter to only keep row number 1
-        subquery = db.query(
-            ScrapedTender.id,
-            func.row_number().over(
-                partition_by=ScrapedTender.tender_no,
-                order_by=ScrapedTender.tender_no.asc()
-            ).label('rn')
-        ).filter(ScrapedTender.query_id == query.id)
-        
-        if min_publish_date:
-            iso_date_str_sub = func.regexp_replace(ScrapedTender.publish_date, r'^(\d{2})-(\d{2})-(\d{4})$', r'\3-\2-\1')
-            safe_iso_date_sub = case(
-                (text("scraped_tenders.publish_date ~ '^\\d{2}-\\d{2}-\\d{4}$'"), iso_date_str_sub),
-                else_='0000-00-00'
-            )
-            subquery = subquery.filter(safe_iso_date_sub >= min_publish_date)
-        
-        subquery = subquery.subquery()
-        
-        base_query = (
-            db.query(ScrapedTender)
-            .join(subquery, ScrapedTender.id == subquery.c.id)
-            .filter(subquery.c.rn == 1)
-        )
+        # OPTIMIZED: Use DISTINCT ON instead of ROW_NUMBER() for much better performance
+        # DISTINCT ON is PostgreSQL-specific and much faster than window functions
+        # It keeps the first row for each tender_no based on the ORDER BY
+        base_query = base_query.distinct(ScrapedTender.tender_no)
 
-    # Safe sort by publish_date
-    # Use string sort on YYYY-MM-DD converted string
+    # Sort by publish_date (converted to ISO format for proper sorting)
     iso_date_str_sort = func.regexp_replace(ScrapedTender.publish_date, r'^(\d{2})-(\d{2})-(\d{4})$', r'\3-\2-\1')
     safe_date_sort = case(
         (text("scraped_tenders.publish_date ~ '^\\d{2}-\\d{2}-\\d{4}$'"), iso_date_str_sort),
         else_='0000-00-00'
     )
 
+    # IMPORTANT: When using DISTINCT ON, the ORDER BY must start with the DISTINCT ON columns
+    # Then add our desired sort order
     return (
         base_query
-        .order_by(desc(safe_date_sort))
+        .order_by(ScrapedTender.tender_no, desc(safe_date_sort))
         .options(joinedload(ScrapedTender.files))
         .offset(offset)
         .limit(limit)

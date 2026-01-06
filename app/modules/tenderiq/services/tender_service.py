@@ -115,16 +115,18 @@ def orm_to_dict(obj, visited=None):
     return obj
 
 def get_full_tender_details(db: Session, tender_id: UUID, tdr: Optional[str] = None) -> Optional[FullTenderDetails]:
+    """
+    Get complete tender details with optimized queries and proper eager loading.
+    """
     # Import here to avoid circular imports
     import logging
     logger = logging.getLogger(__name__)
     
     try:
         tender_id_str = str(tender_id)
-        logger.info(f"Attempting to fetch full tender details for ID: {tender_id_str}")
+        # logger.info(f"Fetching tender details for ID: {tender_id_str}")
         
-        # Step 1: Try to get ScrapedTender first (most common case - returned from wishlist/live tenders)
-        logger.debug(f"Step 1: Querying ScrapedTender by ID: {tender_id_str}")
+        # Step 1: Try ScrapedTender first (most common case)
         scraped_tender = db.query(ScrapedTender).options(
             joinedload(ScrapedTender.files),
             joinedload(ScrapedTender.query)
@@ -133,8 +135,7 @@ def get_full_tender_details(db: Session, tender_id: UUID, tdr: Optional[str] = N
         ).first()
 
         if scraped_tender is None:
-            logger.debug(f"Step 1 failed: ScrapedTender not found. Step 2: Querying Tender by ID")
-            # Step 2: Try to get Tender directly
+            # Step 2: Try Tender directly
             tender = db.query(Tender).options(
                 joinedload(Tender.history)
             ).filter(
@@ -142,9 +143,8 @@ def get_full_tender_details(db: Session, tender_id: UUID, tdr: Optional[str] = N
             ).first()
             
             if tender is None:
-                # Step 3: If tdr (tender ref number) is provided, try to look up by that
+                # Step 3: If tdr provided, lookup by tdr
                 if tdr:
-                    logger.info(f"Step 2 failed. Step 3: Trying lookup by tdr: {tdr}")
                     tender = db.query(Tender).options(
                         joinedload(Tender.history)
                     ).filter(
@@ -152,36 +152,26 @@ def get_full_tender_details(db: Session, tender_id: UUID, tdr: Optional[str] = N
                     ).first()
                     
                     if tender is not None:
-                        # Found by tdr, now get the most recent ScrapedTender for this tdr
+                        # Get most recent ScrapedTender by tdr
                         scraped_tender = db.query(ScrapedTender).options(
                             joinedload(ScrapedTender.files),
                             joinedload(ScrapedTender.query)
                         ).filter(
                             ScrapedTender.tdr == tdr
-                        ).order_by(ScrapedTender.id.desc()).first()  # Get most recent
+                        ).order_by(ScrapedTender.id.desc()).first()
                         
-                        if scraped_tender is not None:
-                            scraped_dict = orm_to_dict(scraped_tender)
-                            tender_dict = orm_to_dict(tender)
-                        else:
-                            # Use Tender data alone
-                            scraped_dict = {}
-                            tender_dict = orm_to_dict(tender)
-                        logger.info(f"Step 3 success: Found tender by tdr")
+                        scraped_dict = orm_to_dict(scraped_tender) if scraped_tender else {}
+                        tender_dict = orm_to_dict(tender)
                     else:
-                        logger.warning(f"Step 3 failed: Tender not found by tdr: {tdr}")
                         return None
                 else:
-                    # Step 4: Try to look up by TenderWishlist.id
-                    # This handles the case where frontend passes wishlist entry ID
-                    logger.info(f"Step 2 failed. Step 4: Trying lookup by TenderWishlist.id: {tender_id_str}")
+                    # Step 4: Try TenderWishlist lookup
                     wishlist_entry = db.query(TenderWishlist).filter(
-                        TenderWishlist.id == tender_id
+                        TenderWishlist.id == tender_id_str
                     ).first()
                     
                     if wishlist_entry is not None and wishlist_entry.tender_ref_number:
                         tdr_from_wishlist = wishlist_entry.tender_ref_number
-                        logger.info(f"Step 4: Found wishlist entry, tdr={tdr_from_wishlist}. Looking up tender by tdr.")
                         
                         tender = db.query(Tender).options(
                             joinedload(Tender.history)
@@ -190,7 +180,6 @@ def get_full_tender_details(db: Session, tender_id: UUID, tdr: Optional[str] = N
                         ).first()
                         
                         if tender is not None:
-                            # Found by wishlist tdr, now get the most recent ScrapedTender
                             scraped_tender = db.query(ScrapedTender).options(
                                 joinedload(ScrapedTender.files),
                                 joinedload(ScrapedTender.query)
@@ -198,27 +187,14 @@ def get_full_tender_details(db: Session, tender_id: UUID, tdr: Optional[str] = N
                                 ScrapedTender.tdr == tdr_from_wishlist
                             ).order_by(ScrapedTender.id.desc()).first()
                             
-                            if scraped_tender is not None:
-                                scraped_dict = orm_to_dict(scraped_tender)
-                                tender_dict = orm_to_dict(tender)
-                            else:
-                                scraped_dict = {}
-                                tender_dict = orm_to_dict(tender)
-                            logger.info(f"Step 4 success: Found tender via wishlist entry tdr")
+                            scraped_dict = orm_to_dict(scraped_tender) if scraped_tender else {}
+                            tender_dict = orm_to_dict(tender)
                         else:
-                            logger.warning(f"Step 4 failed: Tender not found by wishlist tdr: {tdr_from_wishlist}")
                             return None
                     else:
-                        # Additional debugging: check if tender exists at all with any lookup
-                        all_scraped_count = db.query(ScrapedTender).count()
-                        all_tender_count = db.query(Tender).count()
-                        logger.warning(f"Step 2 failed: Tender not found by ID. Lookup failed for {tender_id_str}. "
-                                     f"Total ScrapedTenders in DB: {all_scraped_count}, Total Tenders: {all_tender_count}. "
-                                     f"No tdr provided for fallback. Returning None.")
                         return None
             else:
-                # Step 2b: Found Tender directly by ID, now try to find corresponding ScrapedTender by tdr
-                logger.debug(f"Found Tender with ref: {tender.tender_ref_number}. Looking for ScrapedTender by tdr.")
+                # Found Tender, get ScrapedTender by tdr
                 scraped_tender = db.query(ScrapedTender).options(
                     joinedload(ScrapedTender.files),
                     joinedload(ScrapedTender.query)
@@ -226,7 +202,6 @@ def get_full_tender_details(db: Session, tender_id: UUID, tdr: Optional[str] = N
                     ScrapedTender.tdr == tender.tender_ref_number
                 ).first()
                 
-                # If ScrapedTender not found, use Tender data alone (don't return None)
                 if scraped_tender is None:
                     logger.info(f"ScrapedTender not found for tender_ref: {tender.tender_ref_number}. Using Tender data alone.")
                     scraped_dict = {}

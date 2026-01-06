@@ -102,14 +102,14 @@ class ScrapedTender(Base):
     analysis_status = Column(String, default="pending", nullable=False)  # "pending", "failed", "skipped", "completed"
     error_message = Column(Text, nullable=True)
 
-    query_id = Column(UUID(as_uuid=True), ForeignKey('scraped_tender_queries.id'))
+    query_id = Column(UUID(as_uuid=True), ForeignKey('scraped_tender_queries.id'), index=True)
     query = relationship("ScrapedTenderQuery", back_populates="tenders")
 
     # From TenderDetailPage models
     # TenderDetailNotice
     tdr = Column(String, nullable=True)
     tendering_authority = Column(String, nullable=True)
-    tender_no = Column(String, nullable=True)
+    tender_no = Column(String, nullable=True, index=True)  # Indexed for duplicate detection
     tender_id_detail = Column(String, nullable=True)  # tender_id from notice
     tender_brief = Column(Text, nullable=True)
     # city is already there from Tender model
@@ -125,7 +125,7 @@ class ScrapedTender(Base):
     tender_details = Column(Text, nullable=True)
 
     # TenderDetailKeyDates
-    publish_date = Column(String, nullable=True)
+    publish_date = Column(String, nullable=True, index=True)  # Indexed for date filtering
     last_date_of_bid_submission = Column(String, nullable=True)
     tender_opening_date = Column(String, nullable=True)
 
@@ -138,6 +138,11 @@ class ScrapedTender(Base):
     information_source = Column(String, nullable=True)
 
     files = relationship("ScrapedTenderFile", back_populates="tender", cascade="all, delete-orphan")
+    
+    # Performance indexes
+    __table_args__ = (
+        Index('idx_scraped_tenders_query_tender', 'query_id', 'tender_no'),  # Composite index for common queries
+    )
 
 
 class ScrapedTenderFile(Base):

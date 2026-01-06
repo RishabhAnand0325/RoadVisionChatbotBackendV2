@@ -60,9 +60,13 @@ class BidSynopsisService:
         tender_ref_number = tender.tender_ref_number
 
         # Fetch analysis data if available (tender_id_str from scraped_tender)
+        # Use selectinload for better performance with nested relationships
         analysis = None
         if scraped_tender:
-            analysis = db.query(TenderAnalysis).filter(
+            from sqlalchemy.orm import selectinload
+            analysis = db.query(TenderAnalysis).options(
+                selectinload(TenderAnalysis.rfp_sections)
+            ).filter(
                 TenderAnalysis.tender_id == scraped_tender.tender_id_str
             ).first()
 

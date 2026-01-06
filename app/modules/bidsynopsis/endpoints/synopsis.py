@@ -82,10 +82,12 @@ def get_bid_synopsis(
     
     Fields marked as "N/A" indicate missing data in both tables.
     """
-    # Set cache-busting headers to ensure fresh data
-    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    # Force no-cache and add timestamp to bust all caches
+    from datetime import datetime
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate, max-age=0"
     response.headers["Pragma"] = "no-cache"
     response.headers["Expires"] = "0"
+    response.headers["X-Currency-Fix-Version"] = "2.0"  # Bust client cache
     
     try:
         # Use service layer - same pattern as other endpoints

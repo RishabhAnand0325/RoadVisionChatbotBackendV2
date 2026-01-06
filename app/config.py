@@ -52,7 +52,7 @@ class Settings:
     CELERY_RESULT_BACKEND_URL: str = ""
 
     # Security
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 43200  # 30 days - token persists until explicit logout
     JWT_SECRET_KEY: str = "secret"
     ALGORITHM: str = "HS256"
     

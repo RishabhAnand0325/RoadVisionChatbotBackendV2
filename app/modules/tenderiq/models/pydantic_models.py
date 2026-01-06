@@ -338,98 +338,97 @@ class TenderHistoryItem(BaseModel):
 
 
 class FullTenderDetails(BaseModel):
-    risk_level: RiskLevel
+    risk_level: Optional[RiskLevel] = None
     ## From ScrapedTender
     id: str
 
     # From Tender model
-    tender_id_str: str
-    tender_name: str
-    tender_url: str
+    tender_id_str: Optional[str] = None
+    tender_name: Optional[str] = None
+    tender_url: Optional[str] = None
     # dms_folder_id = Column(UUID(as_uuid=True), nullable=True)
-    city: str
-    summary: str
-    value: str
-    due_date: str
+    city: Optional[str] = None
+    summary: Optional[str] = None
+    value: Optional[str] = None
+    due_date: Optional[str] = None
 
-    analysis_status: str  # Use string instead of enum to avoid import issues
-    error_message: str
+    analysis_status: Optional[str] = None  # Use string instead of enum to avoid import issues
+    error_message: Optional[str] = None
 
-    query_id: str
-    query: str
+    query_id: Optional[str] = None
+    query: Optional[str] = None
 
     # From TenderDetailPage models
     # TenderDetailNotice
-    tdr: str
-    tendering_authority: str
-    tender_no: str
-    tender_id_detail: str
-    tender_brief: str
+    tdr: Optional[str] = None
+    tendering_authority: Optional[str] = None
+    tender_no: Optional[str] = None
+    tender_id_detail: Optional[str] = None
+    tender_brief: Optional[str] = None
     # city is already there from Tender model
-    state: str
-    document_fees: str
-    emd: int
-    tender_value: int
-    tender_type: str
-    bidding_type: str
-    competition_type: str
+    state: Optional[str] = None
+    document_fees: Optional[str] = None
+    emd: Optional[int] = None
+    tender_value: Optional[int] = None
+    tender_type: Optional[str] = None
+    bidding_type: Optional[str] = None
+    competition_type: Optional[str] = None
 
     # TenderDetailDetails
-    tender_details: str
+    tender_details: Optional[str] = None
 
     # TenderDetailKeyDates
-    publish_date: str
-    last_date_of_bid_submission: str
-    tender_opening_date: str
+    publish_date: Optional[str] = None
+    last_date_of_bid_submission: Optional[str] = None
+    tender_opening_date: Optional[str] = None
 
     # TenderDetailContactInformation
-    company_name: str
-    contact_person: str
-    address: str
+    company_name: Optional[str] = None
+    contact_person: Optional[str] = None
+    address: Optional[str] = None
 
     # TenderDetailOtherDetail
-    information_source: str
+    information_source: Optional[str] = None
 
-    files: List[TenderFile]
+    files: List[TenderFile] = []
 
     ## From Tender
-    id: str
-    tender_ref_number: str
-    tender_title: str
-    description: str
-    employer_name: str
-    employer_address: str
-    issuing_authority: str
+    tender_ref_number: Optional[str] = None
+    tender_title: Optional[str] = None
+    description: Optional[str] = None
+    employer_name: Optional[str] = None
+    employer_address: Optional[str] = None
+    issuing_authority: Optional[str] = None
     state: str
-    location: str
-    category: str
-    mode: str
-    estimated_cost: int
-    bid_security: int
-    length_km: int
-    per_km_cost: int
-    span_length: int
-    road_work_amount: int
-    structure_work_amount: int
-    e_published_date: datetime
-    identification_date: datetime
-    submission_deadline: datetime
-    prebid_meeting_date: datetime
-    site_visit_deadline: datetime
-    portal_source: str
-    portal_url: str
-    document_url: str
-    status: StatusEnum
-    review_status: ReviewStatusEnum
-    reviewed_by_id: str
-    reviewed_at: datetime
-    created_at: datetime
-    updated_at: datetime
-    is_favorite: bool
-    is_archived: bool
-    is_wishlisted: bool
-    history: List[ActionHistoryItem]
-    tender_history: List[TenderHistoryItem]
+    location: Optional[str] = None
+    category: Optional[str] = None
+    mode: Optional[str] = None
+    estimated_cost: Optional[int] = None
+    bid_security: Optional[int] = None
+    length_km: Optional[int] = None
+    per_km_cost: Optional[int] = None
+    span_length: Optional[int] = None
+    road_work_amount: Optional[int] = None
+    structure_work_amount: Optional[int] = None
+    e_published_date: Optional[datetime] = None
+    identification_date: Optional[datetime] = None
+    submission_deadline: Optional[datetime] = None
+    prebid_meeting_date: Optional[datetime] = None
+    site_visit_deadline: Optional[datetime] = None
+    portal_source: Optional[str] = None
+    portal_url: Optional[str] = None
+    document_url: Optional[str] = None
+    status: Optional[StatusEnum] = None
+    review_status: Optional[ReviewStatusEnum] = None
+    reviewed_by_id: Optional[str] = None
+    reviewed_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    is_favorite: bool = False
+    is_archived: bool = False
+    is_wishlisted: bool = False
+    history: List[ActionHistoryItem] = []
+    tender_history: List[TenderHistoryItem] = []
     model_config = ConfigDict(from_attributes=True)
 
     @field_validator("publish_date", "due_date", "last_date_of_bid_submission", "tender_opening_date", mode="before")
