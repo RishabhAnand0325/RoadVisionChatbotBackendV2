@@ -246,7 +246,8 @@ def get_daily_tenders_sse(db: Session, start: Optional[int] = 0, end: Optional[i
     )
 
     # Check cache and send cached data immediately for instant load
-    cached_data = _get_from_cache(run_id if run_id else 'default')
+    cache_key = run_id if run_id else 'default'
+    cached_data = _get_from_cache(cache_key)
     seen_tender_ids = set()
     
     if cached_data:
@@ -293,6 +294,9 @@ def get_daily_tenders_sse(db: Session, start: Optional[int] = 0, end: Optional[i
     first_batch_sent = False
     batches_sent = 0
     
+    # Cache collection: Store all tenders organized by category for caching
+    cache_tenders_by_category = {str(q.id): [] for q in categories_of_current_day}
+    
     print(f"[STREAM] Processing {len(categories_of_current_day)} categories, already seen {len(seen_tender_ids)} tenders")
     
     for category in categories_of_current_day:
@@ -320,6 +324,10 @@ def get_daily_tenders_sse(db: Session, start: Optional[int] = 0, end: Optional[i
                     if t.tender_name and t.due_date:
                         accumulated_tenders.append(t)
                         category_tender_count += 1
+                        
+                        # Store tender in cache collection (organized by category)
+                        tender_dict = Tender.model_validate(t).model_dump(mode='json')
+                        cache_tenders_by_category[str(category.id)].append(tender_dict)
                 
                 # Send batches immediately once we have at least 1 tender, then every 50 tenders
                 if len(accumulated_tenders) >= 50 or (not first_batch_sent and len(accumulated_tenders) >= 1):
@@ -365,22 +373,23 @@ def get_daily_tenders_sse(db: Session, start: Optional[int] = 0, end: Optional[i
     
     print(f"[STREAM COMPLETE] Total new tenders streamed: {total_tenders_in_run}, batches sent: {batches_sent}")
     
-    # Update cache with complete data for next request
-    cache_key = run_id if run_id else 'default'
-    if cache_key in ['last_30_days', 'last_7_days', 'last_5_days', 'last_2_days']:
-        # Build complete response for cache
-        cache_data = {
-            'id': str(to_return.id),
-            'run_at': str(to_return.run_at),
-            'date_str': to_return.date_str,
-            'name': to_return.name,
-            'contact': to_return.contact,
-            'no_of_new_tenders': to_return.no_of_new_tenders,
-            'company': to_return.company,
-            'queries': [{'id': str(q.id), 'name': q.query_name, 'tenders': []} for q in categories_of_current_day]
-        }
-        _update_cache(cache_key, cache_data)
-        print(f"[CACHE UPDATE] Cached {total_tenders_in_run} tenders for {cache_key}")
+    # Save properly populated cache with all collected tenders
+    cache_data = {
+        'run_id': run_id,
+        'timestamp': datetime.now().isoformat(),
+        'queries': []
+    }
+    
+    for category in categories_of_current_day:
+        category_tenders = cache_tenders_by_category.get(str(category.id), [])
+        cache_data['queries'].append({
+            'id': str(category.id),
+            'name': category.query_name,
+            'tenders': category_tenders  # Contains actual tender data now
+        })
+    
+    _tender_cache[cache_key] = cache_data
+    print(f"[CACHE SAVED] Cached {total_tenders_in_run} tenders across {len(categories_of_current_day)} categories for key: {cache_key}")
     
     yield ServerSentEvent(event='complete')
 

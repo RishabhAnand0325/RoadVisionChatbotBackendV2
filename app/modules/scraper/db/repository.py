@@ -127,7 +127,12 @@ class ScraperRepository:
             scraped_tender.information_source = details.other_detail.information_source
 
             for file_data in details.other_detail.files:
-                date_str = tender_release_date.strftime("%Y-%m-%d")
+                date_str = None
+                if tender_release_date:
+                    date_str = tender_release_date.strftime("%Y-%m-%d")
+                    
+                if not date_str:
+                    date_str = datetime.now().strftime("%Y-%m-%d")
                 year, month, day = date_str.split('-')
                 safe_filename = self._sanitize_filename(file_data.file_name)
                 dms_path = f"/tenders/{year}/{month}/{day}/{tender_data.tender_id}/files/{safe_filename}"
@@ -273,6 +278,30 @@ class ScraperRepository:
         Returns:
             ScrapedEmailLog record
         """
+        # Check if this email_uid + tender_url combination already exists
+        existing = self.db.query(ScrapedEmailLog).filter(
+            ScrapedEmailLog.email_uid == email_uid,
+            ScrapedEmailLog.tender_url == tender_url
+        ).first()
+        
+        if existing:
+            # Update existing record if new data has higher priority or is a success
+            if processing_status == "success" or (
+                processing_status == existing.processing_status and priority >= existing.priority
+            ):
+                existing.processing_status = processing_status
+                existing.error_message = error_message
+                existing.scrape_run_id = scrape_run_id
+                existing.priority = priority
+                existing.processed_at = datetime.utcnow()
+                self.db.commit()
+                self.db.refresh(existing)
+                return existing
+            else:
+                # Keep existing record if it's already marked as success
+                return existing
+        
+        # Create new record
         email_log = ScrapedEmailLog(
             email_uid=email_uid,
             email_sender=email_sender,

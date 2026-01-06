@@ -21,3 +21,5 @@ model_cache
 app.py
 *.pyc
 backend/
+email.html
+scraper copy/

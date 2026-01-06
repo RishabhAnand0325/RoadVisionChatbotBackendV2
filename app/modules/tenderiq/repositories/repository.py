@@ -47,7 +47,7 @@ def get_tenders_from_category(db: Session, query: ScrapedTenderQuery, offset: in
     return (
         base_query
         .order_by(ScrapedTender.tender_no, desc(safe_date_sort))
-        .options(joinedload(ScrapedTender.files))
+        .options(joinedload(ScrapedTender.files), joinedload(ScrapedTender.query))
         .offset(offset)
         .limit(limit)
         .all()
@@ -57,7 +57,7 @@ def get_all_tenders_from_category(db: Session, query: ScrapedTenderQuery) -> Lis
     return (
         db.query(ScrapedTender)
         .filter(ScrapedTender.query_id == query.id)
-        .options(joinedload(ScrapedTender.files))
+        .options(joinedload(ScrapedTender.files), joinedload(ScrapedTender.query))
         .all()
     )
 

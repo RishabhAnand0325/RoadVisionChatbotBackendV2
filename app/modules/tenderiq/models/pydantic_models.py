@@ -68,6 +68,7 @@ class Tender(BaseModel):
     city: str
     summary: str
     value: str
+    category: Optional[str] = None
     due_date: Optional[str] = None
     tdr: Optional[str] = None
     tendering_authority: Optional[str] = None
@@ -365,7 +366,8 @@ class FullTenderDetails(BaseModel):
     tender_no: Optional[str] = None
     tender_id_detail: Optional[str] = None
     tender_brief: Optional[str] = None
-    # city is already there from Tender model
+    # city and state are defined from ScrapedTender
+    city: Optional[str] = None
     state: Optional[str] = None
     document_fees: Optional[str] = None
     emd: Optional[int] = None
@@ -399,8 +401,8 @@ class FullTenderDetails(BaseModel):
     employer_name: Optional[str] = None
     employer_address: Optional[str] = None
     issuing_authority: Optional[str] = None
-    state: str
-    location: Optional[str] = None
+    # state and city already defined above from ScrapedTender
+    location: Optional[str] = None  # Tender table has location field which maps to city
     category: Optional[str] = None
     mode: Optional[str] = None
     estimated_cost: Optional[int] = None
