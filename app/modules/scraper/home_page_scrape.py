@@ -63,8 +63,8 @@ def scrape_page(url) -> HomePageData:
         # The second one is number of tenders.
         # Ignore the third one
         td_elements = row.find_all('td')
-        query_name = td_elements[0].text
-        no_of_tenders = td_elements[1].text
+        query_name = td_elements[0].text.strip()  # Strip whitespace from query name
+        no_of_tenders = td_elements[1].text.strip()
         queries_and_numbers.append((query_name, no_of_tenders))
         print(row)
 

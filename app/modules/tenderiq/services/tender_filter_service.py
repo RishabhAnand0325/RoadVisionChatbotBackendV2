@@ -15,7 +15,7 @@ import logging
 from typing import List, Optional
 from uuid import UUID
 from datetime import datetime, timedelta
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import desc
 from dateutil import parser as date_parser
 
@@ -267,6 +267,9 @@ class TenderFilterService:
         # This ensures we show current data, not stale Tender data
         scraped_tender = db.query(ScrapedTender).filter(
             ScrapedTender.tender_id_str == tender_obj.tender_ref_number
+        ).options(
+            joinedload(ScrapedTender.files),
+            joinedload(ScrapedTender.query)
         ).order_by(
             desc(ScrapedTender.created_at) if hasattr(ScrapedTender, 'created_at') else desc(ScrapedTender.id)
         ).first()
@@ -346,6 +349,9 @@ class TenderFilterService:
         scraped_tender_repo = TenderIQRepository(db)
         scraped_tenders = scraped_tender_repo.db.query(ScrapedTender).filter(
             ScrapedTender.tender_id_str.in_(tender_ref_numbers)
+        ).options(
+            joinedload(ScrapedTender.files),
+            joinedload(ScrapedTender.query)
         ).all()
         
         # Deduplicate by TDR - keep only the latest version of each tender
@@ -404,6 +410,9 @@ class TenderFilterService:
         scraped_tender_repo = TenderIQRepository(db)
         scraped_tenders = scraped_tender_repo.db.query(ScrapedTender).filter(
             ScrapedTender.tender_id_str.in_(tender_ref_numbers)
+        ).options(
+            joinedload(ScrapedTender.files),
+            joinedload(ScrapedTender.query)
         ).all()
         
         # Deduplicate by TDR - keep only the latest version of each tender

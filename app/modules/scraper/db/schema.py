@@ -139,6 +139,16 @@ class ScrapedTender(Base):
 
     files = relationship("ScrapedTenderFile", back_populates="tender", cascade="all, delete-orphan")
     
+    @property
+    def category(self):
+        """Return the query name as category. Always returns a value, never None."""
+        try:
+            if self.query and hasattr(self.query, 'query_name') and self.query.query_name:
+                return self.query.query_name
+        except Exception:
+            pass
+        return "Uncategorized"
+    
     # Performance indexes
     __table_args__ = (
         Index('idx_scraped_tenders_query_tender', 'query_id', 'tender_no'),  # Composite index for common queries

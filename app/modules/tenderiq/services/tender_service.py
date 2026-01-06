@@ -266,7 +266,12 @@ def get_full_tender_details(db: Session, tender_id: UUID, tdr: Optional[str] = N
     # --- FIX 2: Handle relational object for 'query' (Failing because it's an object/dict) ---
     query_obj = scraped_dict.get("query")
     if isinstance(query_obj, dict):
+        # Extract query_name for category field
+        query_name = query_obj.get("query_name") or query_obj.get("query_text") or ""
         scraped_dict["query"] = query_obj.get("query_text") or ""
+        # Set category from query_name if not already set
+        if not scraped_dict.get("category"):
+            scraped_dict["category"] = query_name
     elif query_obj is None:
         scraped_dict["query"] = ""
 
@@ -289,17 +294,40 @@ def get_full_tender_details(db: Session, tender_id: UUID, tdr: Optional[str] = N
     combined = {**scraped_dict, **tender_dict}
     
     # PRESERVE scraped_dict fields that shouldn't be overridden by empty tender_dict values
-    # This is critical for fields like dates and information_source where tender_dict may have empty strings
+    # This is critical for fields like dates and information_source where tender_dict may have empty strings or None
     preserve_from_scraped = [
         "information_source", "publish_date", "tender_opening_date", 
-        "last_date_of_bid_submission"
+        "last_date_of_bid_submission", "city", "state", "category"
     ]
     for field in preserve_from_scraped:
-        if scraped_dict.get(field) and not combined.get(field):
+        # Check if scraped_dict has a non-empty value and combined either doesn't have it or has None/empty
+        if scraped_dict.get(field) and (not combined.get(field) or combined.get(field) in [None, "", "None"]):
             combined[field] = scraped_dict[field]
+    
+    # FIX LOCATION LOGIC: Ensure city, location, and state are properly mapped
+    # ScrapedTender has 'city' and 'state', Tender has 'location' and 'state'
+    # We need to ensure all three fields are present and consistent
+    if not combined.get("city") and combined.get("location"):
+        combined["city"] = combined["location"]
+    elif not combined.get("location") and combined.get("city"):
+        combined["location"] = combined["city"]
+    
+    # Ensure state is properly set
+    if not combined.get("state") and scraped_dict.get("state"):
+        combined["state"] = scraped_dict["state"]
+    elif not combined.get("state") and tender_dict.get("state"):
+        combined["state"] = tender_dict["state"]
+    
+    # FIX CATEGORY LOGIC: Ensure category is properly set from scraped_dict if tender_dict has None/empty
+    # Category comes from query.query_name which we extracted earlier
+    # This is critical - category must never be empty or None
+    if not combined.get("category") or combined.get("category") in [None, "", "None"]:
+        if scraped_dict.get("category"):
+            combined["category"] = scraped_dict["category"]
 
     # --- FIX: Ensure nullable string fields are never None ---
     # This must happen after the merge to catch any None values that made it through
+    # NOTE: category is NOT in this list because we handle it specially above
     nullable_string_fields = [
         "error_message", "query_id", "tendering_authority", "tender_no",
         "tender_id_detail", "tender_brief", "state", "document_fees", 
@@ -307,7 +335,7 @@ def get_full_tender_details(db: Session, tender_id: UUID, tdr: Optional[str] = N
         "company_name", "contact_person", "address", "information_source", 
         "portal_source", "portal_url", "document_url", "reviewed_by_id", 
         "employer_address", "mode", "tender_opening_date", "publish_date",
-        "last_date_of_bid_submission"
+        "last_date_of_bid_submission", "city", "location"
     ]
     for field in nullable_string_fields:
         if combined.get(field) is None:

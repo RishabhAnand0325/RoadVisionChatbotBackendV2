@@ -1,5 +1,6 @@
 from uuid import uuid4
-from datetime import date as date_type
+from datetime import date as date_type, datetime
+import re
 
 from dateutil import parser
 from sqlalchemy.orm import Session
@@ -11,15 +12,22 @@ from app.modules.scraper.data_models import HomePageData
 def _parse_date(date_string: str) -> str:
     """
     Parses a date string in a flexible format and converts it to 'YYYY-MM-DD'.
+    Handles special formats like DDMMYYYY (without separators).
     """
     if not date_string:
         return "unknown-date"
     try:
+        # Handle DDMMYYYY format (8 digits without separators)
+        if re.match(r'^\d{8}$', date_string):
+            # Try DDMMYYYY format first (common in Indian dates)
+            date_object = datetime.strptime(date_string, "%d%m%Y")
+            return date_object.strftime("%Y-%m-%d")
+        
         # Let dateutil parse the string into a datetime object.
-        date_object = parser.parse(date_string)
+        date_object = parser.parse(date_string, dayfirst=True)
         # Format the object into the desired "YYYY-MM-DD" string.
         return date_object.strftime("%Y-%m-%d")
-    except parser.ParserError:
+    except (parser.ParserError, ValueError):
         print(f"⚠️  Warning: Could not parse the date string '{date_string}'.")
         return "unknown-date"
 
@@ -28,11 +36,18 @@ def _parse_date_to_date_object(date_string: str) -> date_type:
     """
     Parses a date string and returns a date object.
     Used for setting tender_release_date in ScrapeRun.
+    Handles special formats like DDMMYYYY (without separators).
     """
     if not date_string:
         return None
     try:
-        date_object = parser.parse(date_string)
+        # Handle DDMMYYYY format (8 digits without separators)
+        if re.match(r'^\d{8}$', date_string):
+            # Try DDMMYYYY format first (common in Indian dates)
+            date_object = datetime.strptime(date_string, "%d%m%Y")
+            return date_object.date()
+        
+        date_object = parser.parse(date_string, dayfirst=True)
         return date_object.date()
     except (parser.ParserError, ValueError):
         print(f"⚠️  Warning: Could not parse date string '{date_string}', returning None.")
