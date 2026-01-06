@@ -2,8 +2,14 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 from app.config import settings
 
-# Create the SQLAlchemy engine
-engine = create_engine(settings.DATABASE_URL)
+# Create the SQLAlchemy engine with increased pool size for SSE connections
+engine = create_engine(
+    settings.DATABASE_URL,
+    pool_size=20,  # Increased from default 5
+    max_overflow=40,  # Increased from default 10
+    pool_pre_ping=True,  # Verify connections before using
+    pool_recycle=3600  # Recycle connections after 1 hour
+)
 
 # Create a configured "Session" class
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

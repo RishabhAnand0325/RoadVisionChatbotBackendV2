@@ -13,7 +13,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = 'add_auto_analyze_wishlist'
-down_revision: Union[str, Sequence[str], None] = 'add_scraped_at_timestamp'
+down_revision: Union[str, Sequence[str], None] = '8225134edd1d'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

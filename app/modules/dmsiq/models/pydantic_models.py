@@ -191,3 +191,26 @@ class DocumentListResponse(BaseModel):
     total: int
     limit: int
     offset: int
+
+# ==================== AI Analysis ====================
+class KeyEntities(BaseModel):
+    organizations: List[str] = []
+    people: List[str] = []
+    locations: List[str] = []
+
+class ImportantDate(BaseModel):
+    date: str
+    description: str
+
+class AISummary(BaseModel):
+    documentType: str
+    keyTopic: str
+    language: str
+    generatedAt: str
+    executiveSummary: str
+    keyInformation: Dict[str, str]
+    importantDates: List[ImportantDate]
+    keyEntities: KeyEntities
+    riskFlags: List[str] = []
+    tags: List[str] = []
+    confidenceScore: float

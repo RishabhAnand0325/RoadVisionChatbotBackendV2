@@ -2,6 +2,7 @@ import os
 import warnings
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from app.api.v1.router import api_v1_router
 from app.config import settings
 from app.utils import ensure_directory_exists
@@ -25,6 +26,9 @@ def create_app() -> FastAPI:
     )
 
     # --- MIDDLEWARE ---
+    # Add GZip compression for faster response times
+    app.add_middleware(GZipMiddleware, minimum_size=1000)
+    
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"], # In production, restrict this to your frontend's domain
@@ -43,6 +47,23 @@ def create_app() -> FastAPI:
         
         # Table creation is now managed by Alembic migrations.
         # The create_db_and_tables() function is no longer called on startup.
+        
+        # Pre-warm tender cache for instant loads
+        import threading
+        def warm_cache():
+            try:
+                print("Loading tender cache...")
+                from app.db.database import SessionLocal
+                from app.modules.tenderiq.services.tender_service_sse import _prewarm_cache
+                db = SessionLocal()
+                _prewarm_cache(db)
+                db.close()
+                print("✅ Tender cache warmed successfully")
+            except Exception as e:
+                print(f"⚠️ Cache warming failed: {e}")
+        
+        # Run in background thread to not block startup
+        threading.Thread(target=warm_cache, daemon=True).start()
         
         print("--- Startup Complete ---")
 

@@ -45,11 +45,11 @@ def _extract_qualification_requirements_only(analysis: Optional[TenderAnalysis],
     # Try to get from database first (much faster!)
     db_requirements = get_bid_synopsis_from_db(analysis)
     if db_requirements:
-        print(f"✅ Retrieved {len(db_requirements)} qualification criteria from DB")
+        # print(f"✅ Retrieved {len(db_requirements)} qualification criteria from DB")
         return db_requirements
     
     # If not in DB, generate using LLM (will be saved to DB for next time)
-    print("⚠️ Bid synopsis not in DB, generating with LLM...")
+    # print("⚠️ Bid synopsis not in DB, generating with LLM...")
     
     # Use LLM to extract qualification criteria from all analysis data
     try:
@@ -84,11 +84,14 @@ def _extract_qualification_requirements_only(analysis: Optional[TenderAnalysis],
                         if len(doc) > 100:
                             weaviate_content.append(doc)
                 
-                print(f"📚 Retrieved {len(weaviate_content)} detailed chunks from Weaviate")
+                # print(f"📚 Retrieved {len(weaviate_content)} detailed chunks from Weaviate")
+                pass
             else:
-                print("⚠️ Weaviate vector_store not available")
+                # print("⚠️ Weaviate vector_store not available")
+                pass
         except Exception as weaviate_error:
-            print(f"⚠️ Could not fetch from Weaviate: {weaviate_error}")
+            # print(f"⚠️ Could not fetch from Weaviate: {weaviate_error}")
+            pass
         
         # Prepare tender data for LLM
         tender_data = {
@@ -162,7 +165,11 @@ If NO qualification criteria found, return: []"""
             # Format currency value if present
             extracted_value = req.get('extractedValue', '')
             if extracted_value:
+                original_value = extracted_value
                 extracted_value = _standardize_currency_format(extracted_value)
+                # Debug log if currency was reformatted
+                if 'Rs' in str(original_value) and original_value != extracted_value:
+                    print(f"🔄 Currency reformatted: '{original_value}' → '{extracted_value}'")
             
             requirements.append({
                 'description': req.get('description', f'Requirement {i+1}'),
@@ -894,6 +901,81 @@ def _get_qualification_context(section_data: dict, key: str, value: str) -> str:
         return f"Eligibility criteria - {key.replace('_', ' ').title()}: {value}"
 
 
+def _format_indian_currency(text: str) -> str:
+    """
+    Format Indian currency to standard format: Rs. X.XX Cr or Rs. X.XX L
+    Handles various input formats including Indian numbering (5,00,000)
+    
+    Examples:
+        "Rs. 5,00,000" -> "Rs. 5.00 L"
+        "Rs 500000" -> "Rs. 5.00 L"  
+        "Rs. 5,000" -> "Rs. 0.05 L"
+        "INR 46300000" -> "Rs. 4.63 Cr"
+        "Rs. 2.50 Crores" -> "Rs. 2.50 Cr"
+    """
+    import re
+    
+    if not text:
+        return text
+    
+    # Extract number and unit from text
+    # Handle formats like "Rs. 5.00 L" or "Rs. 2.50 Crores" - already formatted (NO COMMAS)
+    already_formatted = re.search(r'Rs\.\s*([\d.]+)\s*(Cr|L)(?:\s|$)', text, re.IGNORECASE)
+    if already_formatted:
+        # Check if it has commas - if so, it needs reformatting
+        if ',' not in text:
+            return text
+    
+    # Try to extract the numeric value and any unit indicators
+    # Pattern matches: Rs. 5,00,000 or Rs 500000 or INR 500000  
+    currency_match = re.search(r'(?:Rs\.?|INR)\s*([\d,]+(?:\.\d+)?)\s*(?:(Crore|Crores|Lakh|Lakhs|Cr|L))?', text, re.IGNORECASE)
+    
+    if currency_match:
+        amount_str = currency_match.group(1).replace(',', '')
+        unit = currency_match.group(2)
+        
+        try:
+            amount = float(amount_str)
+            
+            # If unit is already specified, normalize it
+            if unit:
+                unit_lower = unit.lower()
+                if 'cr' in unit_lower:
+                    # Already in crores
+                    if amount >= 1:
+                        return f"Rs. {amount:.2f} Cr"
+                    else:
+                        # Convert to lakhs for small values
+                        return f"Rs. {amount * 100:.2f} L"
+                elif 'l' in unit_lower or 'lakh' in unit_lower:
+                    # Already in lakhs
+                    if amount >= 100:
+                        # Convert to crores
+                        return f"Rs. {amount / 100:.2f} Cr"
+                    else:
+                        return f"Rs. {amount:.2f} L"
+            
+            # No unit specified - determine based on value magnitude
+            # Assume the input is in Rupees (smallest unit)
+            if amount >= 10000000:  # 1 Crore or more (in rupees)
+                crores = amount / 10000000
+                return f"Rs. {crores:.2f} Cr"
+            elif amount >= 100000:  # 1 Lakh or more (in rupees)
+                lakhs = amount / 100000
+                return f"Rs. {lakhs:.2f} L"
+            else:
+                # For amounts less than 1 Lakh, show in Lakhs with decimals
+                # This handles cases like Rs. 5,000 -> Rs. 0.05 L
+                lakhs = amount / 100000
+                return f"Rs. {lakhs:.2f} L"
+                
+        except ValueError:
+            pass
+    
+    # If no match or conversion failed, return original
+    return text
+
+
 def _extract_qualification_values(text: str) -> str:
     """Extract specific qualification values (years, amounts, percentages, etc.)."""
     import re
@@ -901,14 +983,17 @@ def _extract_qualification_values(text: str) -> str:
     if not text:
         return ""
     
-    # Patterns for qualification-specific values
+    # Patterns for qualification-specific values  
     patterns = [
         # Years of experience
         r'(\d+)\s*(?:years?|yrs?).*(?:experience|exp)',
-        # Monetary amounts (for turnover, net worth, etc.)
-        r'Rs\.\s*([\d,]+(?:\.\d+)?)\s*(?:crore|crores|lakh|lakhs)',
+        # Monetary amounts with explicit Cr/L designation
+        r'Rs\.\s*([\d,]+(?:\.\d+)?)\s*(?:Cr|Crores?|L|Lakhs?)',
+        # Monetary amounts (Indian format with commas like 5,00,000)
+        r'Rs\.\s*([\d,]+(?:\.\d+)?)',
         r'INR\s+([\d,]+(?:\.\d+)?)',
-        r'\b([\d,]{8,}(?:\.\d+)?)\b',  # Large numbers
+        # Large numbers (commas in any position)
+        r'\b([\d,]+)(?=\s|$)',
         # Percentages
         r'(\d+(?:\.\d+)?%)',
         # Technical specifications
@@ -925,10 +1010,20 @@ def _extract_qualification_values(text: str) -> str:
         match = re.search(pattern, text, re.IGNORECASE)
         if match:
             matched_text = match.group(0)
+            print(f"📍 Pattern matched: '{matched_text}' from text: '{text[:100]}...'")
             
-            # For monetary amounts, standardize the format
-            if any(curr in matched_text.lower() for curr in ['rs.', 'inr']) or re.match(r'\d{8,}', matched_text.replace(',', '')):
-                return _standardize_currency_format(matched_text)
+            # For monetary amounts, standardize the format using helper function
+            if any(curr in matched_text.lower() for curr in ['rs.', 'inr', 'crore', 'lakh', 'cr', ' l']):
+                formatted = _format_indian_currency(matched_text)
+                print(f"💵 Formatted currency: '{matched_text}' → '{formatted}'")
+                return formatted
+            # Check if it's a large number (likely currency)
+            elif ',' in matched_text:
+                # Remove commas and check if it's a large number
+                num_str = matched_text.replace(',', '')
+                if num_str.isdigit() and len(num_str) >= 5:
+                    formatted = _format_indian_currency(matched_text)
+                    return formatted
             
             # For other values, return as-is
             return matched_text
@@ -1017,64 +1112,27 @@ def _calculate_qualification_priority(key: str, value: str) -> int:
 
 
 def _standardize_currency_format(text: str) -> str:
-    """Standardize currency format to Rs. X.XX Crores like the rest of the project."""
+    """
+    Standardize currency format to Rs. X.XX Cr/L format.
+    Uses the _format_indian_currency helper for consistency.
+    """
     if not text:
         return text
     
-    import re
+    # Debug: show the input
+    if 'Rs' in text and '5,000' in text:
+        import traceback
+        print(f"\n🔍 _standardize_currency_format called with: '{text}'")
+        print("📞 Call stack:")
+        for line in traceback.format_stack()[-4:-1]:
+            print(f"  {line.strip()}")
     
     # Handle percentage - return as is if it's a meaningful percentage
     if '%' in text and any(word in text.lower() for word in ['turnover', 'revenue', 'contract', 'value', 'cost', 'ecpt']):
         return text
     
-    # Pattern to match various currency formats
-    patterns = [
-        # Rs. X.XX Crore/Crores (already formatted) - return as is
-        r'Rs\.\s*([\d,]+(?:\.\d+)?)\s*Crores?',
-        # Rs. X.XX Lakhs - return as is  
-        r'Rs\.\s*([\d,]+(?:\.\d+)?)\s*Lakhs?',
-        # INR 35400000, INR 35,40,00,000
-        r'INR\s+([\d,]+(?:\.\d+)?)',
-        # Rs. 35400000, Rs 35,40,00,000 (without crore/lakh)
-        r'Rs\.\s*([\d,]+(?:\.\d+)?)(?!\s*(?:crore|lakh))',
-        # ₹ 35400000
-        r'₹\s*([\d,]+(?:\.\d+)?)',
-        # Just numbers with crore/lakh context
-        r'([\d,]+(?:\.\d+)?)\s*(?:crore|crores|lakh|lakhs)',
-        # Raw large numbers (8+ digits) - these need conversion
-        r'^([\d,]{8,}(?:\.\d+)?)$',
-    ]
-    
-    for i, pattern in enumerate(patterns):
-        match = re.search(pattern, text, re.IGNORECASE)
-        if match:
-            # If it's already in the correct format (first two patterns), return as is
-            if i < 2:
-                return text
-                
-            amount_str = match.group(1).replace(',', '')
-            try:
-                amount = float(amount_str)
-                
-                # Convert to crores
-                if amount >= 10000000:  # 1 crore or more
-                    crores = amount / 10000000
-                    if crores.is_integer():
-                        return f"Rs. {int(crores)} Crores"
-                    else:
-                        return f"Rs. {crores:.2f} Crores"
-                elif amount >= 100000:  # 1 lakh or more
-                    lakhs = amount / 100000
-                    if lakhs.is_integer():
-                        return f"Rs. {int(lakhs)} Lakhs"
-                    else:
-                        return f"Rs. {lakhs:.2f} Lakhs"
-                else:
-                    return f"Rs. {amount:,.0f}"
-            except ValueError:
-                continue
-    
-    return text
+    # Use the dedicated Indian currency formatter
+    return _format_indian_currency(text)
 
 
 def _calculate_priority(description: str, content: str) -> int:
@@ -2279,6 +2337,11 @@ def generate_all_requirements(tender: Tender, scraped_tender: Optional[ScrapedTe
     # Extract ONLY qualification requirements from specific sections
     dynamic_requirements = _extract_qualification_requirements_only(analysis, scraped_tender)
     
+    # Debug: log extracted requirements
+    for req in dynamic_requirements:
+        if 'Rs' in str(req.get('extractedValue', '')) and '5,000' in str(req.get('extractedValue', '')):
+            print(f"⚠️ BEFORE formatting - extractedValue: '{req['extractedValue']}'")
+    
     if dynamic_requirements:
         # Use dynamically extracted qualification requirements
         requirements = []
@@ -2289,7 +2352,11 @@ def generate_all_requirements(tender: Tender, scraped_tender: Optional[ScrapedTe
             # Ensure extracted value is properly formatted
             extracted_val = req_data['extractedValue']
             if extracted_val:
+                original = extracted_val
                 extracted_val = _standardize_currency_format(extracted_val)
+                # Debug: log if we're fixing currency
+                if 'Rs' in str(original) and original != extracted_val:
+                    print(f"💰 Reformatting: '{original}' → '{extracted_val}'")
             
             requirements.append(RequirementItem(
                 description=req_data['description'],
@@ -2360,6 +2427,14 @@ def generate_bid_synopsis(tender: Tender, scraped_tender: Optional[ScrapedTender
     """
     basic_info = generate_basic_info(tender, scraped_tender, analysis)
     all_requirements = generate_all_requirements(tender, scraped_tender, analysis)
+
+    # Post-process: Reformat ALL currency values with fixed formatter
+    for req in all_requirements:
+        if req.extractedValue and 'Rs' in str(req.extractedValue):
+            original = req.extractedValue
+            req.extractedValue = _format_indian_currency(req.extractedValue)
+            if original != req.extractedValue:
+                print(f"🔧 Fixed currency: '{original}' → '{req.extractedValue}'")
 
     return BidSynopsisResponse(
         basicInfo=basic_info,

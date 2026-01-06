@@ -1,5 +1,5 @@
 from click import Option
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Response
 from sqlalchemy.orm import Session
 from typing import Optional, Literal
 from uuid import UUID
@@ -106,6 +106,24 @@ def get_daily_tenders_sse(
     return EventSourceResponse(tender_service_sse.get_daily_tenders_sse(db, start, end, run_id))
 
 @router.get(
+    "/tenders-bulk",
+    response_model=DailyTendersResponse,
+    tags=["TenderIQ"],
+    summary="Get all tenders at once (non-streaming, faster)"
+)
+def get_daily_tenders_bulk(
+    scrape_run_id: Optional[str] = None,
+    date_range: Optional[str] = None,
+    db: Session = Depends(get_db_session)
+):
+    """
+    Fast endpoint that returns all tenders at once without streaming.
+    Use date_range for quick filters like 'last_5_days', 'last_30_days', etc.
+    """
+    run_id = date_range if date_range else scrape_run_id
+    return tender_service_sse.get_daily_tenders_bulk(db, run_id)
+
+@router.get(
     "/tenders/{tender_id}",
     response_model=Tender,
     tags=["TenderIQ"],
@@ -138,7 +156,8 @@ def get_tender_details(
 def get_full_tender_details(
     tender_id: UUID,
     tdr: str | None = None,
-    db: Session = Depends(get_db_session)
+    db: Session = Depends(get_db_session),
+    response: Response = None
 ):
     """
     Get complete tender details with all related data.
@@ -155,6 +174,10 @@ def get_full_tender_details(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Tender not found."
             )
+        
+        # Add cache headers for browser caching (5 minutes)
+        if response:
+            response.headers["Cache-Control"] = "public, max-age=300"
         
         return tender_details
     
