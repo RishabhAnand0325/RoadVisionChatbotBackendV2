@@ -98,6 +98,14 @@ class Tender(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
+    @field_validator('city', 'state', mode='before')
+    @classmethod
+    def format_location_fields(cls, v):
+        """Ensure city and state are properly capitalized (title case)"""
+        if v and isinstance(v, str):
+            return v.title()
+        return v
+
     @field_validator("publish_date", "due_date", "last_date_of_bid_submission", "tender_opening_date", mode="before")
     @classmethod
     def normalize_dates(cls, v: Optional[str]) -> Optional[str]:
@@ -224,6 +232,15 @@ class ScrapedTenderRead(BaseModel):
 
     # TenderDetailOtherDetail
     information_source: str
+    
+    @field_validator('city', 'state', mode='before')
+    @classmethod
+    def format_location_fields(cls, v):
+        """Ensure city and state are properly capitalized (title case)"""
+        if v and isinstance(v, str):
+            return v.title()
+        return v
+    
     class Config:
         from_attributes = True
 
@@ -432,6 +449,14 @@ class FullTenderDetails(BaseModel):
     history: List[ActionHistoryItem] = []
     tender_history: List[TenderHistoryItem] = []
     model_config = ConfigDict(from_attributes=True)
+
+    @field_validator('city', 'state', mode='before')
+    @classmethod
+    def format_location_fields(cls, v):
+        """Ensure city and state are properly capitalized (title case)"""
+        if v and isinstance(v, str):
+            return v.title()
+        return v
 
     @field_validator("publish_date", "due_date", "last_date_of_bid_submission", "tender_opening_date", mode="before")
     @classmethod

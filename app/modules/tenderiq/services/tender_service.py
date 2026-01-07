@@ -50,14 +50,20 @@ def normalize_date_format(date_str: Optional[str]) -> str:
 
 
 # --- NEW HELPER FUNCTION ---
-def parse_indian_currency(value: Union[str, int, float, None]) -> int:
-    """Cleans an Indian monetary string (including 'Crore') and converts it to an integer."""
+def parse_indian_currency(value: Union[str, int, float, None]) -> Union[int, str]:
+    """Cleans an Indian monetary string (including 'Crore') and converts it to an integer.
+    Returns the original string if it contains 'Ref Document' or similar non-numeric text."""
     if value is None:
         return 0
     if isinstance(value, (int, float)):
         return int(value)
     if not isinstance(value, str):
         return 0
+    
+    # Check if the value contains "Ref Document" or similar text - return as-is
+    value_lower = value.lower()
+    if any(keyword in value_lower for keyword in ['ref document', 'refer document', 'refer to document', 'see document', 'as per document']):
+        return value
     
     # 1. Handle "Crore" conversion (1 Crore = 10,000,000)
     if "crore" in value.lower():
@@ -317,6 +323,14 @@ def get_full_tender_details(db: Session, tender_id: UUID, tdr: Optional[str] = N
         combined["state"] = scraped_dict["state"]
     elif not combined.get("state") and tender_dict.get("state"):
         combined["state"] = tender_dict["state"]
+    
+    # FIX LOCATION FORMATTING: Ensure city and state are properly capitalized (title case)
+    if combined.get("city") and isinstance(combined.get("city"), str):
+        combined["city"] = combined["city"].title()
+    if combined.get("location") and isinstance(combined.get("location"), str):
+        combined["location"] = combined["location"].title()
+    if combined.get("state") and isinstance(combined.get("state"), str):
+        combined["state"] = combined["state"].title()
     
     # FIX CATEGORY LOGIC: Ensure category is properly set from scraped_dict if tender_dict has None/empty
     # Category comes from query.query_name which we extracted earlier
