@@ -97,7 +97,7 @@ class ScraperRepository:
             tender_name=tender_data.tender_name,
             tender_url=tender_data.tender_url,
             dms_folder_id=tender_data.dms_folder_id,
-            city=tender_data.city,
+            city=tender_data.city.title() if tender_data.city else None,
             summary=tender_data.summary,
             value=tender_data.value,
             due_date=tender_data.due_date,
@@ -110,7 +110,7 @@ class ScraperRepository:
             scraped_tender.tender_no = details.notice.tender_no
             scraped_tender.tender_id_detail = details.notice.tender_id
             scraped_tender.tender_brief = details.notice.tender_brief
-            scraped_tender.state = details.notice.state
+            scraped_tender.state = details.notice.state.title() if details.notice.state else None
             scraped_tender.document_fees = details.notice.document_fees
             scraped_tender.emd = details.notice.emd
             scraped_tender.tender_value = details.notice.tender_value

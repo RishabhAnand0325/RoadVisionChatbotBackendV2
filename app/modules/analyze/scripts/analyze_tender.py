@@ -278,12 +278,24 @@ def analyze_tender(db: Session, tdr: str, wishlist_id: Optional[str] = None):
 
         # Optimize: Single eager-loaded query instead of 3 separate queries
         # This reduces database round-trips from 3 to 1
-        scraped_tender = (
+        # Order by id to get consistent results, and we'll check if files exist
+        scraped_tenders = (
             db.query(ScrapedTender)
             .options(joinedload(ScrapedTender.files))
             .filter(ScrapedTender.tender_id_str == tdr)
-            .first()
+            .all()  # Get all matching records
         )
+        
+        # Prefer the tender record that has files (handles duplicate TDRs)
+        scraped_tender = None
+        if scraped_tenders:
+            for st in scraped_tenders:
+                if st.files and len(st.files) > 0:
+                    scraped_tender = st
+                    break
+            # If no record has files, just use the first one
+            if not scraped_tender:
+                scraped_tender = scraped_tenders[0]
 
         # Also get tender from tenderiq module (separate query is OK here)
         tender = db.query(Tender).filter(Tender.tender_ref_number == tdr).first()
@@ -333,9 +345,10 @@ def analyze_tender(db: Session, tdr: str, wishlist_id: Optional[str] = None):
         # ====================================================================
         # STEP 2: VALIDATE FILES & DOWNLOAD
         # ====================================================================
-        files = scraped_tender.files  # Already loaded via eager loading above
+        # Get files from ScrapedTender (the main source of documents)
+        files = scraped_tender.files if scraped_tender and scraped_tender.files else []
 
-        print(f"📋 Found {len(files) if files else 0} files")
+        print(f"📋 Found {len(files)} files")
 
         if not files:
             logger.warning(f"[{tdr}] No files found for tender")

@@ -1745,82 +1745,75 @@ def _extract_from_analysis(analysis: Optional[TenderAnalysis], field_keywords: s
     return "N/A"
 
 
-def parse_indian_currency(value: Union[str, int, float, None]) -> float:
+def parse_indian_currency(value: Union[str, int, float, None]) -> Union[float, str]:
     """
-    Converts Indian currency format (with Crores, Lakhs) to a numeric value.
-    1 Crore = 10,000,000
-    1 Lakh = 100,000
+    Converts Indian currency format to numeric value in RUPEES.
+    Returns string "Ref Document" if value contains reference to documents.
+    Returns float value in Rupees otherwise.
+    1 Crore = 10,000,000 Rupees
+    1 Lakh = 100,000 Rupees
     """
     if value is None:
         return 0.0
 
-    if isinstance(value, str):
-        value_lower = value.lower().strip()
-        
-        # Skip non-numeric indicators
-        if any(skip_word in value_lower for skip_word in ["refer document", "refer", "n/a", "na", "not available"]):
-            return 0.0
-        
-        # Handle "INR X Lakhs" format (common in scraped data)
-        if "inr" in value_lower and "lakh" in value_lower:
-            match = re.search(r'inr\s*([\d,.]+)\s*lakhs?', value_lower)
-            if match:
-                cleaned_value = match.group(1).replace(',', '')
-                try:
-                    lakh_value = float(cleaned_value)
-                    return lakh_value / 100  # Convert Lakhs to Crores
-                except ValueError:
-                    pass
-        
-        # Handle "INR X Crores" format
-        if "inr" in value_lower and "crore" in value_lower:
-            match = re.search(r'inr\s*([\d,.]+)\s*crores?', value_lower)
-            if match:
-                cleaned_value = match.group(1).replace(',', '')
-                try:
-                    return float(cleaned_value)  # Already in Crores
-                except ValueError:
-                    pass
-        
-        # Handle "crore" conversion
-        if "crore" in value_lower:
-            match = re.search(r'([\d,.]+)', value_lower.replace('crore', ''))
-            if match:
-                cleaned_value = match.group(1).replace(',', '')
-                try:
-                    return float(cleaned_value)  # Already in Crores
-                except ValueError:
-                    pass
-        
-        # Handle "lakh" conversion  
-        if "lakh" in value_lower:
-            match = re.search(r'([\d,.]+)', value_lower.replace('lakh', ''))
-            if match:
-                cleaned_value = match.group(1).replace(',', '')
-                try:
-                    lakh_value = float(cleaned_value)
-                    return lakh_value / 100  # Convert Lakhs to Crores
-                except ValueError:
-                    pass
-
-        # General cleaning: Extract numeric part
-        cleaned_value = re.sub(r'[^\d.]', '', value).replace(',', '')
-        try:
-            numeric_value = float(cleaned_value)
-            # If it's a large number (> 1000000), likely in Rs, convert to Crores
-            if numeric_value > 1000000:
-                return numeric_value / 10000000
-            # If it's a medium number (> 1000), likely in thousands, convert appropriately  
-            elif numeric_value > 1000:
-                return numeric_value / 10000000  # Assume Rs
-            else:
-                return numeric_value  # Assume already in appropriate unit
-        except ValueError:
-            return 0.0
-
     if isinstance(value, (int, float)):
         return float(value)
+    
+    if not isinstance(value, str):
+        return 0.0
+    
+    value_str = str(value).strip()
+    value_lower = value_str.lower()
+    
+    # Check if it contains "Ref Document" or similar - return as string
+    if any(keyword in value_lower for keyword in ['ref document', 'refer document', 'refer to document', 'see document', 'as per document']):
+        return "Ref Document"
+    
+    # Skip N/A values
+    if value_lower in ["n/a", "na", "not available", ""]:
+        return 0.0
+    
+    # Handle "INR X Lakhs" format (e.g., "INR 750000.0 /-")
+    if "inr" in value_lower:
+        # Extract the numeric part
+        match = re.search(r'inr\s*([\d,.]+)', value_lower)
+        if match:
+            cleaned_value = match.group(1).replace(',', '')
+            try:
+                return float(cleaned_value)  # Already in Rupees
+            except ValueError:
+                pass
+    
+    # Handle "X Crores" or "X Crore" 
+    if "crore" in value_lower:
+        match = re.search(r'([\d,.]+)\s*crores?', value_lower)
+        if match:
+            cleaned_value = match.group(1).replace(',', '')
+            try:
+                crore_value = float(cleaned_value)
+                return crore_value * 10000000  # Convert Crores to Rupees
+            except ValueError:
+                pass
+    
+    # Handle "X Lakhs" or "X Lakh"
+    if "lakh" in value_lower:
+        match = re.search(r'([\d,.]+)\s*lakhs?', value_lower)
+        if match:
+            cleaned_value = match.group(1).replace(',', '')
+            try:
+                lakh_value = float(cleaned_value)
+                return lakh_value * 100000  # Convert Lakhs to Rupees
+            except ValueError:
+                pass
 
+    # General cleaning: Extract all digits and decimal point
+    cleaned_value = re.sub(r'[^\d.]', '', value_str)
+    if cleaned_value:
+        try:
+            return float(cleaned_value)
+        except ValueError:
+            return 0.0
+    
     return 0.0
 
 
@@ -1877,45 +1870,68 @@ def _get_from_analysis_scope_of_work(analysis: Optional[TenderAnalysis], field_n
     return None
 
 
-def get_estimated_cost_in_crores(tender: Tender, scraped_tender: Optional[ScrapedTender] = None, analysis: Optional[TenderAnalysis] = None) -> float:
+def get_estimated_cost_in_rupees(tender: Tender, scraped_tender: Optional[ScrapedTender] = None, analysis: Optional[TenderAnalysis] = None) -> float:
     """
-    Converts the estimated cost to Crores for display.
-    Handles conversion from different units (Rs/Lakhs/Crores).
-    Prioritizes analysis data, then tries scraped data, then tender data.
+    Gets the estimated cost in Rupees.
+    Uses the same priority as tender details frontend: scraped_tender.tender_value first.
+    Returns -1.0 to indicate "Ref Document" case, 0.0 if no value found.
     """
-    # First try analysis data (most accurate)
+    # Priority 1: scraped tender data (this is what frontend displays)
+    if scraped_tender and hasattr(scraped_tender, 'tender_value') and scraped_tender.tender_value:
+        tender_value_str = str(scraped_tender.tender_value)
+        
+        # Check if it's explicitly "Ref Document" or similar
+        if any(keyword in tender_value_str.lower().strip() for keyword in ["refer document", "ref document", "refer to document", "see document", "as per document"]):
+            return -1.0  # Special value to indicate "Ref Document"
+        
+        # Try to parse the value
+        if tender_value_str.lower().strip() not in ["n/a", "na", ""]:
+            parsed_value = parse_indian_currency(tender_value_str)
+            if isinstance(parsed_value, str):  # parse_indian_currency might return "Ref Document" string
+                return -1.0
+            if parsed_value > 0:
+                return parsed_value
+    
+    # Priority 2: Analysis data
     if analysis:
         # Try contract value from scope of work
         contract_value = _get_from_analysis_scope_of_work(analysis, 'contract_value')
-        if contract_value and 'refer document' not in contract_value.lower():
+        if contract_value:
+            if 'refer document' in contract_value.lower() or 'ref document' in contract_value.lower():
+                return -1.0
             parsed_value = parse_indian_currency(contract_value)
+            if isinstance(parsed_value, str):
+                return -1.0
             if parsed_value > 0:
                 return parsed_value
         
         # Try contract value from data sheet
         contract_value = _get_from_analysis_data_sheet(analysis, 'contract value')
-        if contract_value and 'refer document' not in contract_value.lower():
+        if contract_value:
+            if 'refer document' in contract_value.lower() or 'ref document' in contract_value.lower():
+                return -1.0
             parsed_value = parse_indian_currency(contract_value)
+            if isinstance(parsed_value, str):
+                return -1.0
             if parsed_value > 0:
                 return parsed_value
     
-    # Try tender data first
+    # Priority 3: Tender estimated_cost (last resort)
     if tender.estimated_cost is not None:
         if isinstance(tender.estimated_cost, Decimal):
             value = float(tender.estimated_cost)
         else:
             value = float(tender.estimated_cost)
 
-        # Smart conversion based on value range
-        if value > 10000000:  # If > 1 Crore, assume it's in Rs
-            return value / 10000000
-        elif value > 0:  # If small positive value, assume already in Crores
+        if value > 0:
             return value
     
-    # Try scraped tender data if tender data is missing/zero
     if scraped_tender and hasattr(scraped_tender, 'tender_value') and scraped_tender.tender_value:
         tender_value_str = scraped_tender.tender_value
-        if tender_value_str and tender_value_str.lower().strip() not in ["refer document", "n/a", "na"]:
+        # Check if it's explicitly "Ref Document" or similar
+        if tender_value_str and any(keyword in tender_value_str.lower().strip() for keyword in ["refer document", "ref document", "refer to document", "see document", "as per document"]):
+            return -1.0  # Special value to indicate "Ref Document"
+        if tender_value_str and tender_value_str.lower().strip() not in ["n/a", "na"]:
             parsed_value = parse_indian_currency(tender_value_str)
             if parsed_value > 0:
                 return parsed_value
@@ -1925,17 +1941,37 @@ def get_estimated_cost_in_crores(tender: Tender, scraped_tender: Optional[Scrape
         # Look for currency patterns in tender details
         details = scraped_tender.tender_details.lower()
         
-        # Pattern for "Rs. X Crore" or "X Crores"
+        # Pattern for "Rs. X Crore" or "X Crores" - return in Rupees
         crore_match = re.search(r'rs\.?\s*(\d+(?:\.\d+)?)\s*crores?', details)
         if crore_match:
-            return float(crore_match.group(1))
+            return float(crore_match.group(1)) * 10000000
             
-        # Pattern for "Rs. X Lakh" -> convert to Crores
+        # Pattern for "Rs. X Lakh" - return in Rupees
         lakh_match = re.search(r'rs\.?\s*(\d+(?:\.\d+)?)\s*lakhs?', details)
         if lakh_match:
-            return float(lakh_match.group(1)) / 100
+            return float(lakh_match.group(1)) * 100000
     
     return 0.0
+
+
+def format_tender_value(value_in_rupees: float) -> str:
+    """
+    Formats tender value using the EXACT same logic as frontend tender details page.
+    Matches the format from TenderDetailsUI.tsx line 220-245.
+    """
+    if value_in_rupees == -1.0:
+        return "Refer Document"
+    elif value_in_rupees <= 0:
+        return "Refer Document"  # Match frontend behavior: 0 or missing = Ref Document
+    elif value_in_rupees >= 10000000:  # >= 1 Crore
+        crores = value_in_rupees / 10000000
+        return f"₹{crores:.2f} Cr"
+    elif value_in_rupees >= 100000:  # >= 1 Lakh
+        lakhs = value_in_rupees / 100000
+        return f"₹{lakhs:.2f} L"
+    else:
+        # Format with commas for readability
+        return f"₹{int(value_in_rupees):,}"
 
 
 def get_bid_security_in_crores(tender: Tender) -> float:
@@ -2239,15 +2275,15 @@ def generate_basic_info(tender: Tender, scraped_tender: Optional[ScrapedTender],
     Dynamically fetches data from analysis, tender and scraped_tender tables.
     """
     # Try analysis data first for most accurate information
-    tender_value_crores = 0.0
+    tender_value_rupees = 0.0
     if analysis:
         value_from_analysis = _extract_from_analysis(analysis, 'value cost contract', 'scope')
         if value_from_analysis != "N/A":
-            tender_value_crores = parse_indian_currency(value_from_analysis)
+            tender_value_rupees = parse_indian_currency(value_from_analysis)
     
     # Fallback to existing logic if analysis doesn't have the data
-    if tender_value_crores == 0.0:
-        tender_value_crores = get_estimated_cost_in_crores(tender, scraped_tender)
+    if tender_value_rupees == 0.0:
+        tender_value_rupees = get_estimated_cost_in_rupees(tender, scraped_tender)
     
     emd_crores = get_bid_security_in_crores(tender)
 
@@ -2284,7 +2320,7 @@ def generate_basic_info(tender: Tender, scraped_tender: Optional[ScrapedTender],
         BasicInfoItem(
             sno=3,
             item="Tender Value",
-            description=f"Rs. {tender_value_crores:.2f} Crores (Excluding GST)" if tender_value_crores > 0 else "N/A"
+            description=format_tender_value(tender_value_rupees)
         ),
         BasicInfoItem(
             sno=4,
@@ -2367,7 +2403,7 @@ def generate_all_requirements(tender: Tender, scraped_tender: Optional[ScrapedTe
         return requirements
     
     # Fallback: If no dynamic extraction possible, use minimal verified requirements
-    tender_value_crores = get_estimated_cost_in_crores(tender, scraped_tender)
+    tender_value_rupees = get_estimated_cost_in_rupees(tender, scraped_tender)
     
     # Only include requirements we can verify from basic tender data
     verified_requirements = []
@@ -2384,12 +2420,13 @@ def generate_all_requirements(tender: Tender, scraped_tender: Optional[ScrapedTe
             ))
     
     # Technical/Financial requirements - Only if we have tender value
-    if tender_value_crores > 0:
+    if tender_value_rupees > 0 and tender_value_rupees != -1.0:
+        tender_value_formatted = format_tender_value(tender_value_rupees)
         verified_requirements.extend([
             RequirementItem(
                 description="Project Value",
-                requirement=f"Project estimated cost is Rs. {tender_value_crores:.2f} Crores as per tender documents.",
-                extractedValue=f"Rs. {tender_value_crores:.2f} Crores",
+                requirement=f"Project estimated cost is {tender_value_formatted}.",
+                extractedValue=tender_value_formatted.replace(" (Excluding GST)", ""),
                 ceigallValue=""
             )
         ])

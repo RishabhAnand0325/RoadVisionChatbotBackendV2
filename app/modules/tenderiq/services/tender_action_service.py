@@ -30,7 +30,7 @@ class TenderActionService:
     def perform_action(self, tender_id: uuid.UUID, user_id: uuid.UUID, request: TenderActionRequest) -> Tender:
         logger.info(f"Performing action on tender: {tender_id}, action: {request.action}")
         
-        # Step 1: Try to get by ScrapedTender ID first (most common case)
+        # Step 1: Try to get by ScrapedTender ID first (most common case - Live Tenders page)
         scraped_tender = self.scraped_tender_repo.get_tender_by_id(tender_id)
         logger.debug(f"Step 1 - ScrapedTender lookup for {tender_id}: {'Found' if scraped_tender else 'Not found'}")
         
@@ -40,20 +40,45 @@ class TenderActionService:
             tender_obj = self.db.query(TenderModel).filter(TenderModel.id == tender_id).first()
             logger.debug(f"Step 2 - Tender lookup result: {'Found' if tender_obj else 'Not found'}")
             
+            # If still not found, try TenderWishlist ID (from Wishlist History page)
             if not tender_obj:
-                logger.error(f"Tender not found in database: {tender_id}")
-                # Check if tender exists with different conditions
-                all_tenders_count = self.db.query(TenderModel).count()
-                all_scraped_tenders_count = self.db.query(ScrapedTender).count()
-                logger.error(f"Total Tenders in DB: {all_tenders_count}, Total ScrapedTenders: {all_scraped_tenders_count}")
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Tender {tender_id} not found")
+                logger.debug(f"Step 3 - TenderWishlist lookup for {tender_id}")
+                # TenderWishlist.id is String type, so convert UUID to string
+                wishlist_entry = self.db.query(TenderWishlist).filter(TenderWishlist.id == str(tender_id)).first()
+                logger.debug(f"Step 3 - TenderWishlist lookup result: {'Found' if wishlist_entry else 'Not found'}")
+                
+                if wishlist_entry:
+                    # Found in wishlist - get tender by tender_ref_number
+                    tender_ref = wishlist_entry.tender_ref_number
+                    tender_obj = self.db.query(TenderModel).filter(TenderModel.tender_ref_number == tender_ref).first()
+                    
+                    # Also get the scraped tender
+                    scraped_tender = self.db.query(ScrapedTender).filter(
+                        ScrapedTender.tender_id_str == tender_ref
+                    ).order_by(
+                        desc(ScrapedTender.id)
+                    ).first()
+                    
+                    if not tender_obj and not scraped_tender:
+                        logger.error(f"Neither Tender nor ScrapedTender found for wishlist tender_ref: {tender_ref}")
+                        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Tender {tender_id} not found")
+                else:
+                    logger.error(f"Tender not found in database: {tender_id}")
+                    # Check if tender exists with different conditions
+                    all_tenders_count = self.db.query(TenderModel).count()
+                    all_scraped_tenders_count = self.db.query(ScrapedTender).count()
+                    all_wishlist_count = self.db.query(TenderWishlist).count()
+                    logger.error(f"Total Tenders in DB: {all_tenders_count}, Total ScrapedTenders: {all_scraped_tenders_count}, Total Wishlist: {all_wishlist_count}")
+                    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Tender {tender_id} not found")
             
-            # Get the most recent ScrapedTender for this Tender
-            scraped_tender = self.db.query(ScrapedTender).filter(
-                ScrapedTender.tender_id_str == tender_obj.tender_ref_number
-            ).order_by(
-                desc(ScrapedTender.id)  # Order by ID descending to get most recent
-            ).first()
+            # Get the most recent ScrapedTender for this Tender if we don't have it yet
+            if not scraped_tender and tender_obj:
+                scraped_tender = self.db.query(ScrapedTender).filter(
+                    ScrapedTender.tender_id_str == tender_obj.tender_ref_number
+                ).order_by(
+                    desc(ScrapedTender.id)  # Order by ID descending to get most recent
+                ).first()
+            
             if not scraped_tender:
                 # If no ScrapedTender exists, we'll work with just the Tender model
                 logger.warning(f"No ScrapedTender found for Tender {tender_id}, using Tender model directly")
