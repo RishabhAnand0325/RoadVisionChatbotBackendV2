@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Document</title>
+  <link rel="stylesheet" href="./template.css">
+</head>
+<body>
+
+  <table id="header" class="blue_text">
+    <tr>
+      <td>
+        <img src="https://wintersunset95.github.io/roadvisionlogo.jpg" />
+      </td>
+      <td>
+        <table>
+          <tr><td class="right_td_align"><h3>New Tender</h3></td></tr>
+          <tr><td id="date" class="right_td_align">{{date}}</td></tr>
+        </table>
+      </td>
+    </tr>
+    <tr>
+      <td></td>
+      <td class="right_td_align" id="contact">{{contact}}</td>
+    </tr>
+    <tr>
+      <td>
+        <table>
+          <tr>
+            <td><h4 id="name">{{name}}</h4></td>
+          </tr>
+          <tr>
+            <td id="company">{{company}}</td>
+          </tr>
+        </table>
+      </td>
+      <td class="right_td_align"><h4><span id="no_of_new_tenders">{{no_of_new_tenders}}</span> New Tenders Related to Your Business</h4></td>
+    </tr>
+  </table>
+
+  <br><br>
+
+  <table id="queries" border="1" bordercolor="gray" cellspacing="0" cellpadding="5">
+    <thead>
+      <tr>
+        <td>Query</td>
+        <td>No. of Tenders Found</td>
+      </tr>
+    </thead>
+    <tbody>
+      <tr class="query_tender_row">
+        <td class="query_tender_row_query">{{query}}</td>
+        <td class="query_tender_row_no_of_tenders_found">{{no_of_tenders_found_under_query}}</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <br><br>
+
+  <div id="tenders">
+    <table class="tender_query_table">
+      <thead>
+        <tr>
+          <td class="center_td_align tender_query_table_tender_name">{{tender_name}}</td>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="staggered_colored">
+            <table class="tender_table" cellspacing="2" cellpadding="5">
+              <tr>
+                <td class="tender_table_tender_name_and_number">{{tender_name_and_number}}</td>
+                <td colspan="2" class="right_td_align tender_table_tender_city">{{tender_city}}</td>
+              </tr>
+            </table>
+            <table>
+              <tr colspan="3">
+                <td class="tender_table_tender_summary">{{tender_summary}}</td>
+              </tr>
+            </table>
+            <table>
+              <tr>
+                <td><b>Tender Value: </b> <span class="tender_table_tender_value">{{tender_value}}</span></td>
+                <td><b>Due Date: </b> <span class="tender_table_tender_due_date">{{tender_due_date}}</span></td>
+                <td class="right_td_align">
+                  <p>
+                    <a href="" class="tender_table_view_tender_link"><b>View Tender</b></a>
+                  </p>
+                  <p>
+                    <a href="" class="tender_table_redirect_to_website"><b>Chat with RoadGPT</b></a>
+                  </p>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+</body>
+</html>

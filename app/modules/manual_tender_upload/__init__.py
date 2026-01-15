@@ -1,0 +1,1 @@
+"""Manual tender upload module."""

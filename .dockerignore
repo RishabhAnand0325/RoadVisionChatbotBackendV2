@@ -1,0 +1,44 @@
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+*.log
+
+# Credentials
+.env
+credentials.json
+token.json
+*.pem
+
+# Database
+*.db
+*.sql
+dump*.sql
+
+# Misc
+.git/
+.gitignore
+README.md
+*.md
+test*.pdf
+test*.html
+email.html
+removed_tenders.json
+scraper.log
