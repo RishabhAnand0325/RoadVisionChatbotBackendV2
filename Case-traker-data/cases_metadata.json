@@ -1,0 +1,674 @@
+[
+  {
+    "caseTitle": "Ceigall India Ltd. vs GMADA",
+    "caseId": "ARB/2024/001",
+    "courtName": "Arbitral Tribunal",
+    "caseType": "Arbitration",
+    "litigationStatus": "Pending",
+    "filingDate": "2024-12-05",
+    "filingNumber": "FN/2024/001",
+    "registrationNumber": "RN/2024/001",
+    "registrationDate": "2024-12-05",
+    "cnrNumber": "PBGM01-000001-2024",
+    "jurisdiction": "Punjab",
+    "courtNumber": "N/A",
+    "judgeName": "Hon'ble Arbitrator",
+    "caseStage": "Statement of Claim",
+    "underActs": "Arbitration and Conciliation Act, 1996",
+    "sections": "Section 21",
+    "policeStation": "N/A",
+    "firNumber": "N/A",
+    "petitioner": "Ceigall India Ltd.",
+    "petitionerAdvocate": "Legal Team",
+    "respondent": "GMADA (Greater Mohali Area Development Authority)",
+    "respondentAdvocate": "N/A",
+    "id": 1,
+    "hearings": [
+      {
+        "date": "2024-12-15",
+        "judge": "Hon'ble Arbitrator",
+        "purpose": "First Hearing",
+        "outcome": "Notice Issued",
+        "document": "Order_15.12.2024.pdf"
+      },
+      {
+        "date": "2025-01-10",
+        "judge": "Hon'ble Arbitrator",
+        "purpose": "Filing of Statement of Claim",
+        "outcome": "SOC Filed",
+        "document": "Order_10.01.2025.pdf"
+      },
+      {
+        "date": "2025-02-15",
+        "judge": "Hon'ble Arbitrator",
+        "purpose": "Filing of Statement of Defence",
+        "outcome": "Scheduled",
+        "document": "N/A"
+      },
+      {
+        "date": "2025-03-20",
+        "judge": "Hon'ble Arbitrator",
+        "purpose": "Admission/Denial",
+        "outcome": "Scheduled",
+        "document": "N/A"
+      }
+    ],
+    "documents": [
+      {
+        "name": "GMDA- Award_05.12.2024_Ceigall_v_GMADA.pdf",
+        "uploadDate": "2024-12-05",
+        "type": "Award"
+      },
+      {
+        "name": "GMDA- SOC-1.pdf",
+        "uploadDate": "2024-12-05",
+        "type": "Statement of Claim"
+      },
+      {
+        "name": "GMDA- SOC-2.pdf",
+        "uploadDate": "2024-12-05",
+        "type": "Statement of Claim"
+      },
+      {
+        "name": "GMDA- SOC-3.pdf",
+        "uploadDate": "2024-12-05",
+        "type": "Statement of Claim"
+      }
+    ],
+    "aiInsights": {
+      "summary": "Arbitration case between Ceigall India Ltd. and GMADA. The case is in early stages with Statement of Claim filed. Respondent is expected to file Statement of Defence by next hearing.",
+      "winProbability": "75%",
+      "estimatedDuration": "12-18 months",
+      "recommendedAction": "Prepare rejoinder draft anticipating common defenses. Monitor filing deadlines for respondent's Statement of Defence."
+    }
+  },
+  {
+    "caseTitle": "Ceigall India Ltd. vs PWD Shimla (Hamirpur Arbitration)",
+    "caseId": "ARB/2024/002",
+    "courtName": "Arbitral Tribunal",
+    "caseType": "Arbitration",
+    "litigationStatus": "Closed",
+    "filingDate": "2024-07-04",
+    "filingNumber": "FN/2024/002",
+    "registrationNumber": "RN/2024/002",
+    "registrationDate": "2024-07-04",
+    "cnrNumber": "HPHA01-000002-2024",
+    "jurisdiction": "Himachal Pradesh",
+    "courtNumber": "N/A",
+    "judgeName": "Hon'ble Arbitrator",
+    "caseStage": "Final Award",
+    "underActs": "Arbitration and Conciliation Act, 1996",
+    "sections": "Section 31",
+    "policeStation": "N/A",
+    "firNumber": "N/A",
+    "petitioner": "Ceigall India Ltd. (Claimant)",
+    "petitionerAdvocate": "Legal Team",
+    "respondent": "PWD Shimla Hamirpur",
+    "respondentAdvocate": "Government Counsel",
+    "id": 2,
+    "hearings": [
+      {
+        "date": "2024-07-20",
+        "judge": "Hon'ble Arbitrator",
+        "purpose": "First Hearing - Preliminary Issues",
+        "outcome": "Parties heard, directions issued",
+        "document": "Order_20.07.2024.pdf"
+      },
+      {
+        "date": "2024-08-15",
+        "judge": "Hon'ble Arbitrator",
+        "purpose": "Statement of Claim Submission",
+        "outcome": "SOC filed by Claimant",
+        "document": "Order_15.08.2024.pdf"
+      },
+      {
+        "date": "2024-09-25",
+        "judge": "Hon'ble Arbitrator",
+        "purpose": "Statement of Defence Submission",
+        "outcome": "SOD filed by Respondent",
+        "document": "Order_25.09.2024.pdf"
+      },
+      {
+        "date": "2024-10-30",
+        "judge": "Hon'ble Arbitrator",
+        "purpose": "Rejoinder Submission",
+        "outcome": "Rejoinder filed by Claimant",
+        "document": "Order_30.10.2024.pdf"
+      },
+      {
+        "date": "2024-12-10",
+        "judge": "Hon'ble Arbitrator",
+        "purpose": "Final Arguments",
+        "outcome": "Arguments completed, Award reserved",
+        "document": "Order_10.12.2024.pdf"
+      },
+      {
+        "date": "2025-07-04",
+        "judge": "Hon'ble Arbitrator",
+        "purpose": "Pronouncement of Final Award",
+        "outcome": "Award passed in favor of Claimant",
+        "document": "Final_Award_04.07.2025.pdf"
+      }
+    ],
+    "documents": [
+      {
+        "name": "Dt. 04.07.2025 Final Award CIL & Shimla Hamirpur PWD Shimla.pdf",
+        "uploadDate": "2024-07-04",
+        "type": "Final Award"
+      },
+      {
+        "name": "SOC - CLAM Hamirpur_Statement of Claim on behalf of the Claimant.pdf",
+        "uploadDate": "2024-07-04",
+        "type": "Statement of Claim"
+      },
+      {
+        "name": "SOD- Statement of Defence - Hamirpur Arbitration case (1).pdf",
+        "uploadDate": "2024-07-04",
+        "type": "Statement of Defence"
+      },
+      {
+        "name": "Rejoinder on behalf of the Claimant to the Statement of Defence filed by the Respondent.pdf",
+        "uploadDate": "2024-07-04",
+        "type": "Rejoinder"
+      }
+    ],
+    "aiInsights": {
+      "summary": "Arbitration case concluded with Final Award dated 04.07.2025 in favor of Ceigall India Ltd. The case progressed through all stages including SOC, SOD, Rejoinder, and final arguments. Award has been passed and case is now closed.",
+      "winProbability": "100% (Case Won)",
+      "estimatedDuration": "Completed (12 months)",
+      "recommendedAction": "Archive case files. Monitor for any challenge under Section 34 of the Arbitration Act. Initiate execution proceedings if required."
+    }
+  },
+  {
+    "caseTitle": "S.R. Bommai vs Union Of India",
+    "caseId": "1994 AIR 1918, 1994 SCC (3) 1",
+    "courtName": "Supreme Court",
+    "caseType": "Civil Suit",
+    "litigationStatus": "Closed",
+    "filingDate": "N/A",
+    "filingNumber": "N/A",
+    "registrationNumber": "N/A",
+    "registrationDate": "N/A",
+    "cnrNumber": "N/A",
+    "jurisdiction": "India",
+    "courtNumber": "N/A",
+    "judgeName": "Kuldip Singh (J); Sawant, P.B.; Ramaswamy, K.; Agrawal, S.C. (J); Yogeshwar Dayal (J); Jeevan Reddy, B.P. (J); Pandian, S.R. (J); Ahmadi, A.M. (J)",
+    "caseStage": "Judgment",
+    "underActs": "Constitution of India;Government of Union Territories Act, 1963;Commissions of Inquiry Act, 1952",
+    "sections": "Articles 74(2), 163, 355, 356, 357, 368; Section 51; Section 3",
+    "policeStation": "N/A",
+    "firNumber": "N/A",
+    "petitioner": "S.R. Bommai",
+    "petitionerAdvocate": "N/A",
+    "respondent": "Union Of India",
+    "respondentAdvocate": "N/A",
+    "id": 3,
+    "hearings": [
+      {
+        "date": "1994-03-11",
+        "judge": "Kuldip Singh (J); Sawant, P.B.; Ramaswamy, K.; Agrawal, S.C. (J); Yogeshwar Dayal (J); Jeevan Reddy, B.P. (J); Pandian, S.R. (J); Ahmadi, A.M. (J)",
+        "purpose": "Judgment",
+        "outcome": "Disposed",
+        "document": "Order_dated_11.03.1994.pdf"
+      }
+    ],
+    "documents": [
+      {
+        "name": "S.R._Bommai_vs_Union_Of_India_on_11_March_1994-1-DONE_20260115_131431.pdf",
+        "uploadDate": "2026-01-15",
+        "type": "Uploaded Document"
+      }
+    ],
+    "aiInsights": {
+      "summary": "The case S.R. Bommai vs Union Of India deals with the powers of the President to issue Proclamations under Article 356(1) of the Constitution and the Centre-State relations. The case is disposed of.",
+      "winProbability": "N/A",
+      "estimatedDuration": "Completed",
+      "recommendedAction": "No action required - case concluded"
+    }
+  },
+  {
+    "caseTitle": "Bhule Ram vs . Uoi",
+    "caseId": "LAC No. 28/06",
+    "courtName": "Delhi District Court",
+    "caseType": "Land Acquisition Case",
+    "litigationStatus": "Disposed",
+    "filingDate": "N/A",
+    "filingNumber": "N/A",
+    "registrationNumber": "N/A",
+    "registrationDate": "N/A",
+    "cnrNumber": "N/A",
+    "jurisdiction": "Delhi",
+    "courtNumber": "N/A",
+    "judgeName": "A.K.MENDIRATTA",
+    "caseStage": "Judgment",
+    "underActs": "Land Acquisition Act",
+    "sections": "u/s 19; section 4; u/s 9; 10; u/s 18; u/s 12 (2); u/s 23 (1A); Section 34; Section 28",
+    "policeStation": "N/A",
+    "firNumber": "N/A",
+    "petitioner": "Sh.Bhule Ram",
+    "petitionerAdvocate": "N/A",
+    "respondent": "Union of India; Delhi Development Authority",
+    "respondentAdvocate": "N/A",
+    "id": 4,
+    "hearings": [
+      {
+        "date": "2007-02-23",
+        "judge": "A.K.MENDIRATTA",
+        "purpose": "Judgment",
+        "outcome": "Disposed",
+        "document": "Order_dated_23.02.2007.pdf"
+      },
+      {
+        "date": "1995-12-14",
+        "judge": "Full Bench of the Hon'ble High Court",
+        "purpose": "Dismissal of Civil Writ Petition No. 562/83 and 563/83",
+        "outcome": "Dismissed",
+        "document": "N/A"
+      }
+    ],
+    "documents": [
+      {
+        "name": "Bhule_Ram_vs__Uoi_IndianKanoon.txt",
+        "uploadDate": "2026-01-15",
+        "type": "Uploaded Document"
+      }
+    ],
+    "aiInsights": {
+      "summary": "The case pertains to land acquisition for planned development of Delhi. The petitioner was dissatisfied with the land rates assessed by the LAC and filed a reference petition u/s 18 of the LA Act. The court decided on the issues including limitation and market value of the acquired land, and awarded interest u/s 34.",
+      "winProbability": "Partially allowed",
+      "estimatedDuration": "Completed (10 years)",
+      "recommendedAction": "No action required - case concluded"
+    }
+  },
+  {
+    "caseTitle": "Goan Real Estate & Constrn.Ld.& Anr vs Union Of India Tr.Sec.Min.Of Env.& Ors",
+    "caseId": "Writ Petition (C) NO.329 OF 2008",
+    "courtName": "Supreme Court of India",
+    "caseType": "Writ Petition",
+    "litigationStatus": "Pending",
+    "filingDate": "N/A",
+    "filingNumber": "N/A",
+    "registrationNumber": "N/A",
+    "registrationDate": "N/A",
+    "cnrNumber": "N/A",
+    "jurisdiction": "N/A",
+    "courtNumber": "N/A",
+    "judgeName": "K.G. Balakrishnan, J.M. Panchal",
+    "caseStage": "Arguments",
+    "underActs": "Environment (Protection) Rules, 1986; Societies Registration Act, 1960; Environment Act, 1986",
+    "sections": "Article 32",
+    "policeStation": "N/A",
+    "firNumber": "N/A",
+    "petitioner": "Goan Real Estate & Construction Ltd. & Anr.",
+    "petitionerAdvocate": "N/A",
+    "respondent": "Union of India through Secretary, Ministry of Environment & Ors.",
+    "respondentAdvocate": "N/A",
+    "id": 5,
+    "hearings": [
+      {
+        "date": "1996-04-18",
+        "judge": "N/A",
+        "purpose": "Judgment in Indian Council for Enviro-Legal Action vs. Union of India",
+        "outcome": "Partly accepted the petition by striking down two amendments introduced by notification dated August 16, 1994",
+        "document": "Indian Council for Enviro-Legal Action vs. Union of India, (1996) 5 SCC 281"
+      },
+      {
+        "date": "2006-10-22",
+        "judge": "N/A",
+        "purpose": "Goa Coastal Zone Management Authority issued communication regarding constructions violating CRZ guidelines",
+        "outcome": "Directed Additional Collector to ascertain whether clearance under CRZ had been obtained",
+        "document": "Order_dated_22.10.2006.pdf"
+      },
+      {
+        "date": "2006-12-22",
+        "judge": "N/A",
+        "purpose": "Additional Collector, North Goa issued a stop work order",
+        "outcome": "Directed the Police and Town Planning Authority to maintain the status quo at the site",
+        "document": "Order_dated_22.12.2006.pdf"
+      },
+      {
+        "date": "2007-01-24",
+        "judge": "N/A",
+        "purpose": "Clarification issued by the Central Government through the Ministry of Environment and Forests",
+        "outcome": "Clarified that new developmental activities would attract the provisions of CRZ notification of 1991 from April 18, 1996",
+        "document": "Order_dated_24.01.2007.pdf"
+      },
+      {
+        "date": "2007-02-13",
+        "judge": "N/A",
+        "purpose": "Further clarification issued by the Additional Director of the MOEF",
+        "outcome": "Clarified that any developmental activity initiated between August 16, 1994 and April 18, 1996 after obtaining requisite clearances should be construed as an on-going project",
+        "document": "Order_dated_13.02.2007.pdf"
+      },
+      {
+        "date": "2007-03-28",
+        "judge": "N/A",
+        "purpose": "Goa Coastal Zone Management Authority addressed a communication to the Additional Collector",
+        "outcome": "Decided that on the property of the petitioner No.l, `No Development Zone' should be marked at 100 meters and the stop work order, if any, in operation beyond such `No Development Zone' should be vacated",
+        "document": "Order_dated_28.03.2007.pdf"
+      },
+      {
+        "date": "2007-05-16",
+        "judge": "N/A",
+        "purpose": "MOEF, Government of India, issued clarification",
+        "outcome": "Requested the Member-Secretary, Department of Science, Technology and Environment of Government of Goa to get the matter examined by the Goa Coastal Zone Management Authority keeping in view the clarifications issued by the Ministry vide letter dated February 13, 2007",
+        "document": "Order_dated_16.05.2007.pdf"
+      },
+      {
+        "date": "2007-05-23",
+        "judge": "N/A",
+        "purpose": "Additional Collector, Goa, passed an order",
+        "outcome": "Vacated the stop work order dated December 12, 2006 but, in fact, permitting the construction beyond 100 meters and not 50 meters",
+        "document": "Order_dated_23.05.2007.pdf"
+      },
+      {
+        "date": "2007-07-24",
+        "judge": "N/A",
+        "purpose": "Hearing of writ petition No.365 of 2007 in the High Court of Bombay at Goa",
+        "outcome": "State of Goa would withdraw the stop work orders dated December 22, 2006 and May 23, 2007 to the extent, they imposed an embargo on construction between 50 meters and 100 meters",
+        "document": "Order_dated_24.07.2007.pdf"
+      },
+      {
+        "date": "2007-10-30",
+        "judge": "N/A",
+        "purpose": "National Coastal Zone Management Authority considered the matter",
+        "outcome": "Authority concluded that the stand taken by the MOEF vide letters dated January 24, 2007, February 13, 2007 and May 16, 2007 was correct one and was in accordance with the CRZ notification of 1991",
+        "document": "N/A"
+      },
+      {
+        "date": "2010-03-31",
+        "judge": "K.G. Balakrishnan, J.M. Panchal",
+        "purpose": "Final Judgment",
+        "outcome": "N/A",
+        "document": "Order_dated_31.03.2010.pdf"
+      }
+    ],
+    "documents": [
+      {
+        "name": "Goan_Real_Estate__ConstrnLd_Anr_vs_Union_Of_In_IndianKanoon.txt",
+        "uploadDate": "2026-01-15",
+        "type": "Uploaded Document"
+      }
+    ],
+    "aiInsights": {
+      "summary": "Goan Real Estate filed a writ petition to validate building plans sanctioned under the Coastal Regulation Zone Notification, seeking clarification on construction restrictions. The case involves disputes over 'No Development Zones' and the interpretation of prior Supreme Court judgments regarding construction permissions.",
+      "winProbability": "Uncertain",
+      "estimatedDuration": "1-2 years",
+      "recommendedAction": "Prepare for next hearing; gather additional evidence."
+    }
+  },
+  {
+    "caseTitle": "M/S. Ceigall India Limited vs National Highway Authority Of India & ...",
+    "caseId": "W.P.(C) 4054/2025",
+    "courtName": "Delhi High Court",
+    "caseType": "Writ Petition",
+    "litigationStatus": "Pending",
+    "filingDate": "N/A",
+    "filingNumber": "18887/2025",
+    "registrationNumber": "N/A",
+    "registrationDate": "N/A",
+    "cnrNumber": "N/A",
+    "jurisdiction": "Delhi",
+    "courtNumber": "N/A",
+    "judgeName": "Tushar Rao Gedela",
+    "caseStage": "Judgment Reserved",
+    "underActs": "Constitution of India, 1950",
+    "sections": "Article 226",
+    "policeStation": "N/A",
+    "firNumber": "N/A",
+    "petitioner": "M/S. CEIGALL INDIA LIMITED",
+    "petitionerAdvocate": "Mr. Sandeep Sethi, Sr. Adv. with Ms. Apara Mahishi, Mr. Anshuman Pande, Mr. Mrigank Behl and Mr. Sumer Dev Seth, Advs.",
+    "respondent": "NATIONAL HIGHWAY AUTHORITY OF INDIA & ANR.",
+    "respondentAdvocate": "Mr. Manish K. Bishnoi and Mr. Khubaib Shakeel, Advs. for NHAI; Mr. Aditya Kumar and Ms. Ilanath, Advs. for R-2.",
+    "id": 6,
+    "hearings": [
+      {
+        "date": "2025-08-08",
+        "judge": "Tushar Rao Gedela",
+        "purpose": "Judgment reserved",
+        "outcome": "Judgment reserved",
+        "document": "Order_dated_08.08.2025.pdf"
+      },
+      {
+        "date": "2025-08-13",
+        "judge": "Tushar Rao Gedela",
+        "purpose": "Judgment delivered",
+        "outcome": "N/A",
+        "document": "Order_dated_13.08.2025.pdf"
+      }
+    ],
+    "documents": [
+      {
+        "name": "MS_Ceigall_India_Limited_vs_National_Highway_Aut_IndianKanoon.txt",
+        "uploadDate": "2026-01-15",
+        "type": "Uploaded Document"
+      }
+    ],
+    "aiInsights": {
+      "summary": "M/S. Ceigall India Limited filed a writ petition against National Highway Authority of India challenging the declaration of its bid as non-responsive and seeking to prevent the forfeiture of its bid security. The court is considering whether the error in the bid amount was bonafide and whether NHAI can take penal action.",
+      "winProbability": "Uncertain",
+      "estimatedDuration": "8-12 months",
+      "recommendedAction": "Prepare for judgment delivery and any subsequent actions based on the outcome."
+    }
+  },
+  {
+    "caseTitle": "Manikonda Yadaiah And Another vs Srinivas Katta And 204 Others",
+    "caseId": "Civil Revision Petition Nos.5279, 5570, 5631, 5632, 5633, 5634, 5635, 5665, 5666, 5667, 5668, 5680, 5681, 5683, 5686, 5731, 5732, 5858, 6164, 6461, 6479, 6503, 6504 of 2016; 6, 210, 219, 377, 998, 999, 1070, 1071, 1188, 1588, 1882, 1938, 1951, 2046, 2437 and 3160 of 2017 and Writ Petition Nos.3860/2008, 6759/2017 and 11157/2019",
+    "courtName": "Telangana High Court",
+    "caseType": "Civil Revision Petition; Writ Petition",
+    "litigationStatus": "Disposed",
+    "filingDate": "N/A",
+    "filingNumber": "N/A",
+    "registrationNumber": "N/A",
+    "registrationDate": "N/A",
+    "cnrNumber": "N/A",
+    "jurisdiction": "Telangana",
+    "courtNumber": "N/A",
+    "judgeName": "SRI JUSTICE C.V. BHASKAR REDDY",
+    "caseStage": "Disposed",
+    "underActs": "Andhra Pradesh (Telangana Area) Tenancy and Agricultural Lands Act, 1950; Andhra Pradesh Land Reforms (Ceiling on Agricultural Holdings) Act, 1973; Urban Areas (Development) Act, 1975",
+    "sections": "Section 91; Section 8; Section 38-E; Section 37-A; Section 19; Section 38(E); Section 38A; Section 38B; Section 22(1); Section 11; Section 13; Section 102(e); Section 38-D",
+    "policeStation": "N/A",
+    "firNumber": "N/A",
+    "petitioner": "Manikonda Yadaiah And Another",
+    "petitionerAdvocate": "N/A",
+    "respondent": "Srinivas Katta And 204 Others",
+    "respondentAdvocate": "N/A",
+    "id": 7,
+    "hearings": [
+      {
+        "date": "2025-10-06",
+        "judge": "SRI JUSTICE C.V. BHASKAR REDDY",
+        "purpose": "Common Order",
+        "outcome": "Disposed of by common order",
+        "document": "Order_dated_06.10.2025.pdf"
+      },
+      {
+        "date": "2016-09-24",
+        "judge": "N/A",
+        "purpose": "Challenged common order",
+        "outcome": "Order challenged",
+        "document": "Order_dated_24.09.2016.pdf"
+      },
+      {
+        "date": "2006-09-08",
+        "judge": "Hon'ble Supreme Court",
+        "purpose": "Status quo orders granted",
+        "outcome": "Status quo orders granted",
+        "document": "Order_dated_08.09.2006.pdf"
+      },
+      {
+        "date": "1981-02-17",
+        "judge": "N/A",
+        "purpose": "Order to conduct an enquiry",
+        "outcome": "Directed enquiry by the Collector or designated officer",
+        "document": "Order_dated_17.02.1981.pdf"
+      },
+      {
+        "date": "1987-07-15",
+        "judge": "Learned Single Judge",
+        "purpose": "Allowed the Writ Petition",
+        "outcome": "Writ Petition allowed",
+        "document": "Order_dated_15.07.1987.pdf"
+      },
+      {
+        "date": "1993-01-25",
+        "judge": "N/A",
+        "purpose": "Dismissed Writ Appeal",
+        "outcome": "Writ Appeal dismissed",
+        "document": "Order_dated_25.01.1993.pdf"
+      },
+      {
+        "date": "1997-07-21",
+        "judge": "Land Reforms Appellate Tribunal",
+        "purpose": "Allowed the appeal",
+        "outcome": "Appeal allowed",
+        "document": "Order_dated_21.07.1997.pdf"
+      },
+      {
+        "date": "1998-02-09",
+        "judge": "N/A",
+        "purpose": "Disposed of Writ Petition",
+        "outcome": "Directed the R.D.O to dispose of the applications filed by the protected tenants",
+        "document": "Order_dated_09.02.1998.pdf"
+      },
+      {
+        "date": "1998-06-20",
+        "judge": "Joint Collector",
+        "purpose": "Dismissed the appeal",
+        "outcome": "Appeal dismissed",
+        "document": "Order_dated_20.06.1998.pdf"
+      },
+      {
+        "date": "1999-02-18",
+        "judge": "LRT",
+        "purpose": "Re-computed the holding",
+        "outcome": "Declared surplus",
+        "document": "Order_dated_18.02.1999.pdf"
+      },
+      {
+        "date": "1999-05-26",
+        "judge": "LRT",
+        "purpose": "Directed surrender of lands",
+        "outcome": "Directed surrender of lands",
+        "document": "Order_dated_26.05.1999.pdf"
+      },
+      {
+        "date": "2000-09-29",
+        "judge": "N/A",
+        "purpose": "Allowed appeal and remitted back for fresh disposal",
+        "outcome": "Appeal allowed and remitted back for fresh disposal",
+        "document": "Order_dated_29.09.2000.pdf"
+      },
+      {
+        "date": "1999-09-20",
+        "judge": "N/A",
+        "purpose": "Disposed of Writ Petition",
+        "outcome": "Directed authorities to consider applications of tenants",
+        "document": "Order_dated_20.09.1999.pdf"
+      },
+      {
+        "date": "2003-12-09",
+        "judge": "Joint Collector",
+        "purpose": "Allowed the appeals",
+        "outcome": "Appeals allowed by setting aside order dated 28.04.2001",
+        "document": "Order_dated_09.12.2003.pdf"
+      },
+      {
+        "date": "2005-10-07",
+        "judge": "N/A",
+        "purpose": "Allowed CRP No.6708 of 2003 and dismissed CRP No.1200 of 2003",
+        "outcome": "CRP No.6708 of 2003 allowed and CRP No.1200 of 2003 dismissed",
+        "document": "Order_dated_07.10.2005.pdf"
+      },
+      {
+        "date": "2010-12-07",
+        "judge": "Hon'ble Apex Court",
+        "purpose": "Allowed the appeals and remitted the matter to the High Court",
+        "outcome": "Appeals allowed and remitted the matter to the High Court",
+        "document": "Order_dated_07.12.2010.pdf"
+      },
+      {
+        "date": "2013-02-25",
+        "judge": "Hon'ble Division Bench",
+        "purpose": "Disposing of CRP No.6708 of 2003 and batch, Remanded the matter to the Revenue Divisional Officer, Chevella",
+        "outcome": "Matter remanded to the Revenue Divisional Officer, Chevella",
+        "document": "Order_dated_25.02.2013.pdf"
+      },
+      {
+        "date": "2013-10-15",
+        "judge": "3rd respondent",
+        "purpose": "Orders",
+        "outcome": "Orders in proceeding No.G/2690/2013",
+        "document": "Order_dated_15.10.2013.pdf"
+      }
+    ],
+    "documents": [
+      {
+        "name": "Manikonda_Yadaiah_And_Another_vs_Srinivas_Katta_An_IndianKanoon.txt",
+        "uploadDate": "2026-01-15",
+        "type": "Uploaded Document"
+      }
+    ],
+    "aiInsights": {
+      "summary": "The case involves multiple civil revision petitions and writ petitions concerning land rights and tenancy issues in Gachibowli Village. The High Court disposed of these cases with a common order, after a prior remand from the Supreme Court and subsequent proceedings before the Revenue Divisional Officer.",
+      "winProbability": "N/A",
+      "estimatedDuration": "Completed",
+      "recommendedAction": "No action required - case concluded"
+    }
+  },
+  {
+    "caseTitle": "Chief Commissioner Of Income Tax Osd ... vs M/S Ceigall India Ltd",
+    "caseId": "ITA-61-2021",
+    "courtName": "Punjab-Haryana High Court",
+    "caseType": "Appeal",
+    "litigationStatus": "Dismissed",
+    "filingDate": "N/A",
+    "filingNumber": "N/A",
+    "registrationNumber": "N/A",
+    "registrationDate": "N/A",
+    "cnrNumber": "N/A",
+    "jurisdiction": "Punjab and Haryana",
+    "courtNumber": "N/A",
+    "judgeName": "Tejinder Singh Dhindsa; Pankaj Jain",
+    "caseStage": "Disposed",
+    "underActs": "Income Tax Act, 1961",
+    "sections": "Section 260-A; Section 143(3); Section 145(3); Section 69C",
+    "policeStation": "N/A",
+    "firNumber": "N/A",
+    "petitioner": "Chief Commissioner of Income Tax OSD Ludhiana",
+    "petitionerAdvocate": "Mr. Rajesh Katoch, Sr. Standing Counsel; Ms. Pridhi Jaswinder Sandhu, Jr. Standing Counsel",
+    "respondent": "M/s. Ceigall India Ltd., Ludhiana",
+    "respondentAdvocate": "N/A",
+    "id": 8,
+    "hearings": [
+      {
+        "date": "2020-11-19",
+        "judge": "N/A",
+        "purpose": "Order of Income Tax Appellate Tribunal (ITAT)",
+        "outcome": "Appeal filed by the revenue stands dismissed.",
+        "document": "Order_dated_19.11.2020.pdf"
+      },
+      {
+        "date": "2022-08-06",
+        "judge": "Tejinder Singh Dhindsa; Pankaj Jain",
+        "purpose": "Date of decision",
+        "outcome": "Dismissed",
+        "document": "Order_dated_06.08.2022.pdf"
+      }
+    ],
+    "documents": [
+      {
+        "name": "Chief_Commissioner_Of_Income_Tax_Osd__vs_MS_Ce_IndianKanoon.txt",
+        "uploadDate": "2026-01-16",
+        "type": "Uploaded Document"
+      }
+    ],
+    "aiInsights": {
+      "summary": "The appeal filed by the revenue against the order of the Income Tax Appellate Tribunal (ITAT) regarding the assessment year 2014-15 was dismissed by the High Court. The ITAT's decision involved issues of net profit rate application and unexplained expenditure additions.",
+      "winProbability": "Lost - dismissed",
+      "estimatedDuration": "Completed (1 year, 8 months)",
+      "recommendedAction": "No action required - case concluded"
+    }
+  }
+]
