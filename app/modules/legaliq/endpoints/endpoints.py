@@ -115,12 +115,12 @@ import shutil
 import tempfile
 from docx import Document
 import fitz  # PyMuPDF
-import google.generativeai as genai
+import google.genai as genai
 from app.config import settings
 
 # Configure Gemini
-genai.configure(api_key=settings.GOOGLE_API_KEY)
-model = genai.GenerativeModel('gemini-2.0-flash')
+gemini_client = genai.Client(api_key=settings.GOOGLE_API_KEY)
+gemini_model = 'gemini-2.0-flash'
 
 class ComparisonSummary(BaseModel):
     additions: int
@@ -232,7 +232,10 @@ async def compare_documents(
         """
         
         try:
-            response = model.generate_content(prompt)
+            response = gemini_client.models.generate_content(
+                model=gemini_model,
+                contents=prompt
+            )
             ai_analysis = json.loads(response.text.replace("```json", "").replace("```", ""))
             
             additions = ai_analysis["summary"]["additions"]

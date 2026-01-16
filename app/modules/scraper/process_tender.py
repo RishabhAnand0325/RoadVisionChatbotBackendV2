@@ -6,7 +6,7 @@ import uuid
 
 from app.modules.askai.models.document import ProcessingStage, ProcessingStatus, UploadJob
 from app.modules.scraper.data_models import TenderDetailPage
-from app.core.services import vector_store, pdf_processor, weaviate_client, excel_processor, llm_model
+from app.core.services import vector_store, pdf_processor, weaviate_client, excel_processor, get_llm_model
 from app.core.global_stores import upload_jobs
 from app.db.database import SessionLocal
 from app.modules.scraper.db.schema import ScrapedTender
@@ -148,7 +148,8 @@ QUESTION: {question}
 ANSWER:"""
 
             try:
-                response = llm_model.generate_content(prompt)
+                llm = get_llm_model()
+                response = llm.generate_content(prompt)
                 answer = response.text.strip()
                 answer_stripped = answer[:100].replace('\n', ' ')
                 print(f"  🗣️ LLM Response: {answer_stripped}...")

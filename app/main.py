@@ -13,7 +13,6 @@ os.environ["GRPC_VERBOSITY"] = "NONE"
 os.environ["GRPC_CPP_VERBOSITY"] = "NONE"
 os.environ["GLOG_minloglevel"] = "3"
 warnings.filterwarnings("ignore")
-warnings.filterwarnings("ignore", category=FutureWarning, module="google.generativeai")
 warnings.filterwarnings("ignore", category=DeprecationWarning, module="PyPDF2")
 warnings.filterwarnings("ignore", message="datetime.datetime.utcfromtimestamp()")
 

@@ -1,5 +1,5 @@
 import json
-import google.generativeai as genai
+import google.genai as genai
 from typing import Dict, Any, Optional
 from fastapi import HTTPException
 from app.config import settings
@@ -13,8 +13,8 @@ class AIAnalysisService:
         if not settings.GOOGLE_API_KEY:
             raise ValueError("GOOGLE_API_KEY not configured")
         
-        genai.configure(api_key=settings.GOOGLE_API_KEY)
-        self.model = genai.GenerativeModel('gemini-2.0-flash-exp')
+        self.client = genai.Client(api_key=settings.GOOGLE_API_KEY)
+        self.model = 'gemini-2.0-flash-exp'
     
     async def analyze_legal_document(
         self, 
@@ -39,7 +39,10 @@ class AIAnalysisService:
             prompt = self._build_analysis_prompt(document_text, user_metadata)
             
             # Generate analysis
-            response = self.model.generate_content(prompt)
+            response = self.client.models.generate_content(
+                model=self.model,
+                contents=prompt
+            )
             
             # Parse the JSON response
             analysis_result = self._parse_ai_response(response.text)

@@ -113,9 +113,9 @@ load_environment()
 ensure_directory_exists(config.CHROMA_PATH)
 
 try:
-    import google.generativeai as genai
-    genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
-    model = genai.GenerativeModel("gemini-2.0-flash-exp")
+    import google.genai as genai
+    gemini_client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
+    gemini_model = "gemini-2.0-flash-exp"
     print("✅ Gemini 2.0 Flash configured")
 
     embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
@@ -1211,7 +1211,10 @@ INSTRUCTIONS:
         
         # Get AI response
         try:
-            response = model.generate_content(gemini_history)
+            response = gemini_client.models.generate_content(
+                model=gemini_model,
+                contents=gemini_history
+            )
             bot_response = response.text if hasattr(response, "text") else "I couldn't generate a response."
         except Exception as api_error:
             print(f"❌ Gemini API error: {api_error}")

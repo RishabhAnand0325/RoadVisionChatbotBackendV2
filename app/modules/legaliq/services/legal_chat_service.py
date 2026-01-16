@@ -1,14 +1,13 @@
 # app/modules/legaliq/services/legal_bot_service.py
 import os
 import shutil
-import google.generativeai as genai
+import google.genai as genai
 import PyPDF2
 from fastapi import UploadFile
 from typing import List
 import warnings
 
 # Suppress warnings for cleaner console output
-warnings.filterwarnings("ignore", category=FutureWarning, module="google.generativeai")
 warnings.filterwarnings("ignore", category=DeprecationWarning, module="PyPDF2")
 
 class LegalChatbotService:
@@ -16,8 +15,8 @@ class LegalChatbotService:
         # Load API Key from environment variable for security
         self.api_key = os.getenv("GOOGLE_API_KEY")
         if self.api_key:
-            genai.configure(api_key=self.api_key)
-            self.model = genai.GenerativeModel('gemini-2.0-flash')
+            self.client = genai.Client(api_key=self.api_key)
+            self.model = 'gemini-2.0-flash'
         
         # Temp storage for session documents
         self.upload_dir = "./temp_legal_docs"
@@ -93,7 +92,10 @@ class LegalChatbotService:
         """
         
         try:
-            response = self.model.generate_content(full_prompt)
+            response = self.client.models.generate_content(
+                model=self.model,
+                contents=full_prompt
+            )
             answer_text = response.text
 
             # Naive relevance scoring: count keyword overlaps between query and each page snippet
@@ -218,7 +220,10 @@ Return ONLY valid JSON, no additional text.
 """
         
         try:
-            response = self.model.generate_content(analysis_prompt)
+            response = self.client.models.generate_content(
+                model=self.model,
+                contents=analysis_prompt
+            )
             response_text = response.text.strip()
             
             # Clean up response (remove markdown code blocks if present)
